@@ -22,7 +22,9 @@ struct DesktopRootView: View {
     .background(
       WindowTabConfigurationView(
         title: "Teleport Desktop",
-        onCloseTab: closeSelectedTabFromShortcut
+        onCloseTab: closeSelectedTabFromShortcut,
+        onSelectPreviousTab: selectPreviousTabFromShortcut,
+        onSelectNextTab: selectNextTabFromShortcut
       )
     )
     .toolbar {
@@ -572,6 +574,14 @@ struct DesktopRootView: View {
 
   private func closeSelectedTabFromShortcut() -> Bool {
     tabStore.closeSelectedTab()
+  }
+
+  private func selectPreviousTabFromShortcut() -> Bool {
+    tabStore.selectPreviousTab()
+  }
+
+  private func selectNextTabFromShortcut() -> Bool {
+    tabStore.selectNextTab()
   }
 }
 

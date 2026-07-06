@@ -42,4 +42,27 @@ struct DesktopTabStoreTests {
     #expect(!store.closeSelectedTab())
     #expect(store.tabs.count == 1)
   }
+
+  @MainActor
+  @Test func selectNextTabWrapsAround() {
+    let store = DesktopTabStore()
+    let firstTabID = store.selectedTabID
+
+    _ = store.openShellTab()
+
+    #expect(store.selectNextTab())
+    #expect(store.selectedTabID == firstTabID)
+  }
+
+  @MainActor
+  @Test func selectPreviousTabWrapsAround() {
+    let store = DesktopTabStore()
+    let firstTabID = store.selectedTabID
+
+    let secondTab = store.openShellTab()
+    store.selectTab(id: firstTabID)
+
+    #expect(store.selectPreviousTab())
+    #expect(store.selectedTabID == secondTab.id)
+  }
 }

@@ -4,9 +4,15 @@ import SwiftUI
 struct WindowTabConfigurationView: NSViewRepresentable {
   let title: String
   let onCloseTab: () -> Bool
+  let onSelectPreviousTab: () -> Bool
+  let onSelectNextTab: () -> Bool
 
   func makeCoordinator() -> Coordinator {
-    Coordinator(onCloseTab: onCloseTab)
+    Coordinator(
+      onCloseTab: onCloseTab,
+      onSelectPreviousTab: onSelectPreviousTab,
+      onSelectNextTab: onSelectNextTab
+    )
   }
 
   func makeNSView(context: Context) -> NSView {
@@ -15,6 +21,8 @@ struct WindowTabConfigurationView: NSViewRepresentable {
 
   func updateNSView(_ nsView: NSView, context: Context) {
     context.coordinator.onCloseTab = onCloseTab
+    context.coordinator.onSelectPreviousTab = onSelectPreviousTab
+    context.coordinator.onSelectNextTab = onSelectNextTab
 
     DispatchQueue.main.async {
       guard let window = nsView.window else {
@@ -32,12 +40,20 @@ struct WindowTabConfigurationView: NSViewRepresentable {
 extension WindowTabConfigurationView {
   final class Coordinator {
     var onCloseTab: () -> Bool
+    var onSelectPreviousTab: () -> Bool
+    var onSelectNextTab: () -> Bool
 
     private weak var window: NSWindow?
     private var monitor: Any?
 
-    init(onCloseTab: @escaping () -> Bool) {
+    init(
+      onCloseTab: @escaping () -> Bool,
+      onSelectPreviousTab: @escaping () -> Bool,
+      onSelectNextTab: @escaping () -> Bool
+    ) {
       self.onCloseTab = onCloseTab
+      self.onSelectPreviousTab = onSelectPreviousTab
+      self.onSelectNextTab = onSelectNextTab
     }
 
     deinit {
@@ -72,6 +88,18 @@ extension WindowTabConfigurationView {
         if flags == [.command],
            event.charactersIgnoringModifiers?.lowercased() == "w" {
           return self.onCloseTab() ? nil : event
+        }
+
+        if flags.contains(.command),
+           flags.contains(.option) {
+          switch event.keyCode {
+          case 123:
+            return self.onSelectPreviousTab() ? nil : event
+          case 124:
+            return self.onSelectNextTab() ? nil : event
+          default:
+            break
+          }
         }
 
         return event
