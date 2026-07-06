@@ -20,7 +20,10 @@ struct DesktopRootView: View {
       detail
     }
     .background(
-      WindowTabConfigurationView(title: "Teleport Desktop")
+      WindowTabConfigurationView(
+        title: "Teleport Desktop",
+        onCloseTab: closeSelectedTabFromShortcut
+      )
     )
     .toolbar {
       ToolbarItem(placement: .principal) {
@@ -565,6 +568,10 @@ struct DesktopRootView: View {
     }
 
     NSApp.keyWindow?.performClose(nil)
+  }
+
+  private func closeSelectedTabFromShortcut() -> Bool {
+    tabStore.closeSelectedTab()
   }
 }
 
