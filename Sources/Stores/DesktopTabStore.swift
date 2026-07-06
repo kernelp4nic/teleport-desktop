@@ -5,16 +5,19 @@ import Observation
 @Observable
 final class DesktopTabStore {
   var tabs: [DesktopTab]
-  var selectedTabID: UUID
+  var selectedTabID: UUID?
 
-  init(initialWindowState: DesktopWindowState = .shell()) {
-    let tab = DesktopTab(windowState: initialWindowState)
-    tabs = [tab]
-    selectedTabID = tab.id
+  init() {
+    tabs = []
+    selectedTabID = nil
   }
 
   var selectedTab: DesktopTab? {
-    tabs.first { $0.id == selectedTabID }
+    guard let selectedTabID else {
+      return nil
+    }
+
+    return tabs.first { $0.id == selectedTabID }
   }
 
   @discardableResult
@@ -26,13 +29,12 @@ final class DesktopTabStore {
   }
 
   @discardableResult
-  func openShellTab() -> DesktopTab {
-    openTab(windowState: .shell())
-  }
-
-  @discardableResult
   func closeSelectedTab() -> Bool {
-    closeTab(id: selectedTabID)
+    guard let selectedTabID else {
+      return false
+    }
+
+    return closeTab(id: selectedTabID)
   }
 
   @discardableResult
@@ -41,14 +43,10 @@ final class DesktopTabStore {
       return false
     }
 
-    guard tabs.count > 1 else {
-      return false
-    }
-
     tabs.remove(at: index)
 
     if selectedTabID == id {
-      selectedTabID = tabs[min(index, tabs.count - 1)].id
+      selectedTabID = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].id
     }
 
     return true

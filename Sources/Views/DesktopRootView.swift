@@ -8,6 +8,7 @@ struct DesktopRootView: View {
   @Bindable var settings: SettingsStore
   @SceneStorage("desktop.searchText") private var searchText = ""
   @SceneStorage("desktop.selectedGroup") private var selectedGroup = Self.allGroups
+  @State private var browserSelectedNodeID: String?
   @State private var tabStore = DesktopTabStore()
 
   private static let allGroups = "__all_groups__"
@@ -47,12 +48,6 @@ struct DesktopRootView: View {
           store.login(using: settings)
         } label: {
           Label("Login", systemImage: "person.badge.key")
-        }
-
-        Button {
-          openShellTab()
-        } label: {
-          Label("New Shell", systemImage: "terminal")
         }
 
         Button {
@@ -96,26 +91,29 @@ struct DesktopRootView: View {
     }
   }
 
+  @ViewBuilder
   private var toolbarTabStrip: some View {
-    ScrollView(.horizontal) {
-      HStack(spacing: 8) {
-        ForEach(tabStore.tabs) { tab in
-          DesktopTabPillView(
-            title: tab.terminalStore.currentTitle,
-            isSelected: tab.id == tabStore.selectedTabID,
-            onSelect: {
-              tabStore.selectTab(id: tab.id)
-            },
-            onClose: {
-              closeTab(tab)
-            }
-          )
+    if !tabStore.tabs.isEmpty {
+      ScrollView(.horizontal) {
+        HStack(spacing: 8) {
+          ForEach(tabStore.tabs) { tab in
+            DesktopTabPillView(
+              title: tab.terminalStore.currentTitle,
+              isSelected: tab.id == tabStore.selectedTabID,
+              onSelect: {
+                tabStore.selectTab(id: tab.id)
+              },
+              onClose: {
+                closeTab(tab)
+              }
+            )
+          }
         }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
       }
-      .padding(.horizontal, 4)
-      .padding(.vertical, 2)
+      .scrollIndicators(.hidden)
     }
-    .scrollIndicators(.hidden)
   }
 
   private var sidebar: some View {
@@ -311,12 +309,12 @@ struct DesktopRootView: View {
           }
           .scrollIndicators(.hidden)
         } else {
-          Text("Select a server to open a Teleport tab, or keep using the local shell below.")
+          Text("Select a server to start a Teleport session.")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
 
-        Text(activeTab?.terminalStore.statusMessage ?? "Interactive shell ready")
+        Text(activeTab?.terminalStore.statusMessage ?? "Ready to connect")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -329,6 +327,13 @@ struct DesktopRootView: View {
               .strokeBorder(.quaternary, lineWidth: 1)
           )
           .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        ContentUnavailableView(
+          "No Active Connection",
+          systemImage: "terminal",
+          description: Text("Connect to a server from the sidebar to open a Teleport tab.")
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
     }
     .padding(20)
@@ -337,10 +342,14 @@ struct DesktopRootView: View {
   private var selectedNodeBinding: Binding<String?> {
     Binding(
       get: {
-        activeTab?.selectedNodeID
+        activeTab?.selectedNodeID ?? browserSelectedNodeID
       },
       set: { newValue in
-        activeTab?.selectedNodeID = newValue
+        if let activeTab {
+          activeTab.selectedNodeID = newValue
+        } else {
+          browserSelectedNodeID = newValue
+        }
       }
     )
   }
@@ -427,7 +436,9 @@ struct DesktopRootView: View {
   }
 
   private var selectedNode: TeleportNode? {
-    guard let selectedNodeID = activeTab?.selectedNodeID else {
+    let selectedNodeID = activeTab?.selectedNodeID ?? browserSelectedNodeID
+
+    guard let selectedNodeID else {
       return nil
     }
 
@@ -455,7 +466,7 @@ struct DesktopRootView: View {
       return selectedNode.hostname
     }
 
-    return activeTab?.terminalStore.currentTitle ?? "Teleport Desktop"
+    return activeTab?.terminalStore.currentTitle ?? "Select a Server"
   }
 
   private var detailSubtitle: String {
@@ -488,15 +499,13 @@ struct DesktopRootView: View {
     )
   }
 
-  private func openShellTab() {
-    _ = tabStore.openShellTab()
-  }
-
   private func openNodeInApp(node: TeleportNode) {
     guard let command = store.connectCommand(for: node, settings: settings) else {
       store.errorMessage = "Could not resolve an SSH login for \(node.hostname)."
       return
     }
+
+    browserSelectedNodeID = node.id
 
     let login = resolvedLogin(for: node) ?? "unknown"
     _ = tabStore.openTab(
@@ -547,33 +556,46 @@ struct DesktopRootView: View {
   }
 
   private func reconcileSelection() {
-    guard let activeTab else {
+    if let activeTab {
+      if let selectedNodeID = activeTab.selectedNodeID,
+         store.nodes.contains(where: { $0.id == selectedNodeID }) {
+        return
+      }
+
+      guard !filteredNodes.isEmpty else {
+        activeTab.selectedNodeID = nil
+        return
+      }
+
+      activeTab.selectedNodeID = filteredNodes[0].id
       return
     }
 
-    if let selectedNodeID = activeTab.selectedNodeID,
-       store.nodes.contains(where: { $0.id == selectedNodeID }) {
+    if let browserSelectedNodeID,
+       store.nodes.contains(where: { $0.id == browserSelectedNodeID }) {
       return
     }
 
     guard !filteredNodes.isEmpty else {
-      activeTab.selectedNodeID = nil
+      browserSelectedNodeID = nil
       return
     }
 
-    activeTab.selectedNodeID = filteredNodes[0].id
+    browserSelectedNodeID = filteredNodes[0].id
   }
 
   private func closeTab(_ tab: DesktopTab) {
-    if tabStore.closeTab(id: tab.id) {
-      return
-    }
-
-    NSApp.keyWindow?.performClose(nil)
+    browserSelectedNodeID = tab.selectedNodeID
+    _ = tabStore.closeTab(id: tab.id)
   }
 
   private func closeSelectedTabFromShortcut() -> Bool {
-    tabStore.closeSelectedTab()
+    guard let activeTab else {
+      return false
+    }
+
+    closeTab(activeTab)
+    return true
   }
 
   private func selectPreviousTabFromShortcut() -> Bool {
