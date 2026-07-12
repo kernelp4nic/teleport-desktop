@@ -4,15 +4,18 @@ import SwiftUI
 
 struct EmbeddedTerminalView: NSViewRepresentable {
   let sessionStore: TerminalSessionStore
+  let focusToken: Int
 
   func makeNSView(context: Context) -> TerminalContainerView {
     let containerView = TerminalContainerView()
     containerView.attach(hostView: sessionStore.terminalController.hostView)
+    containerView.focusTerminalIfNeeded(using: focusToken)
     return containerView
   }
 
   func updateNSView(_ nsView: TerminalContainerView, context: Context) {
     nsView.attach(hostView: sessionStore.terminalController.hostView)
+    nsView.focusTerminalIfNeeded(using: focusToken)
   }
 }
 
@@ -48,6 +51,7 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
 
 final class TerminalContainerView: NSView {
   private weak var attachedHostView: TerminalHostView?
+  private var lastFocusToken: Int?
 
   func attach(hostView: TerminalHostView) {
     guard attachedHostView !== hostView else {
@@ -66,6 +70,18 @@ final class TerminalContainerView: NSView {
       hostView.topAnchor.constraint(equalTo: topAnchor),
       hostView.bottomAnchor.constraint(equalTo: bottomAnchor)
     ])
+  }
+
+  func focusTerminalIfNeeded(using token: Int) {
+    guard lastFocusToken != token else {
+      return
+    }
+
+    lastFocusToken = token
+
+    DispatchQueue.main.async { [weak self] in
+      self?.attachedHostView?.focusTerminal()
+    }
   }
 }
 
@@ -125,6 +141,14 @@ final class TerminalHostView: NSView {
     )
 
     self.terminalView = terminalView
+  }
+
+  func focusTerminal() {
+    guard let terminalView else {
+      return
+    }
+
+    window?.makeFirstResponder(terminalView)
   }
 
   private func updateBackgroundColor() {

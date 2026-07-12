@@ -9,6 +9,7 @@ struct DesktopRootView: View {
   @SceneStorage("desktop.searchText") private var searchText = ""
   @SceneStorage("desktop.selectedGroup") private var selectedGroup = Self.allGroups
   @State private var browserSelectedNodeID: String?
+  @State private var terminalFocusToken = 0
   @State private var tabStore = DesktopTabStore()
 
   private static let allGroups = "__all_groups__"
@@ -87,7 +88,9 @@ struct DesktopRootView: View {
       reconcileSelection()
     }
     .onChange(of: tabStore.selectedTabID) {
+      syncSidebarSelectionToActiveTab()
       reconcileSelection()
+      requestTerminalFocus()
     }
   }
 
@@ -95,7 +98,7 @@ struct DesktopRootView: View {
   private var toolbarTabStrip: some View {
     if !tabStore.tabs.isEmpty {
       ScrollView(.horizontal) {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
           ForEach(tabStore.tabs) { tab in
             DesktopTabPillView(
               title: tab.terminalStore.currentTitle,
@@ -109,8 +112,8 @@ struct DesktopRootView: View {
             )
           }
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 2)
+        .padding(.horizontal, 2)
+        .padding(.vertical, 1)
       }
       .scrollIndicators(.hidden)
     }
@@ -259,38 +262,38 @@ struct DesktopRootView: View {
 
           Spacer()
 
-          if isSelectedNodeConnectedInApp {
+          if isActiveTabConnected {
             Label("Connected in This Tab", systemImage: "checkmark.circle.fill")
               .font(.caption.weight(.medium))
               .foregroundStyle(.secondary)
           } else {
             HStack(spacing: 10) {
               Button("Connect") {
-                if let selectedNode {
-                  openNodeInApp(node: selectedNode)
+                if let actionNode {
+                  openNodeInApp(node: actionNode)
                 }
               }
               .buttonStyle(.borderedProminent)
-              .disabled(selectedNode == nil || selectedLogin == nil)
+              .disabled(actionNode == nil || actionLogin == nil)
 
               Button(openExternallyTitle) {
-                if let selectedNode {
-                  openNodeExternally(selectedNode)
+                if let actionNode {
+                  openNodeExternally(actionNode)
                 }
               }
-              .disabled(selectedNode == nil || selectedLogin == nil)
+              .disabled(actionNode == nil || actionLogin == nil)
             }
           }
         }
 
-        if let selectedNode {
+        if let detailNode {
           HStack(spacing: 8) {
-            Text(selectedNode.address)
+            Text(detailNode.address)
               .font(.caption)
               .foregroundStyle(.secondary)
 
-            if let selectedLogin {
-              Label(selectedLogin, systemImage: "person.crop.circle")
+            if let detailLogin {
+              Label(detailLogin, systemImage: "person.crop.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
@@ -298,7 +301,7 @@ struct DesktopRootView: View {
 
           ScrollView(.horizontal) {
             HStack(spacing: 6) {
-              ForEach(selectedNode.displayLabels(
+              ForEach(detailNode.displayLabels(
                 groupKey: settings.normalizedGroupingLabelKey,
                 loginKey: settings.normalizedLoginLabelKey,
                 limit: 8
@@ -320,7 +323,10 @@ struct DesktopRootView: View {
       }
 
       if let activeTab {
-        EmbeddedTerminalView(sessionStore: activeTab.terminalStore)
+        EmbeddedTerminalView(
+          sessionStore: activeTab.terminalStore,
+          focusToken: terminalFocusToken
+        )
           .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
           .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -342,14 +348,10 @@ struct DesktopRootView: View {
   private var selectedNodeBinding: Binding<String?> {
     Binding(
       get: {
-        activeTab?.selectedNodeID ?? browserSelectedNodeID
+        browserSelectedNodeID
       },
       set: { newValue in
-        if let activeTab {
-          activeTab.selectedNodeID = newValue
-        } else {
-          browserSelectedNodeID = newValue
-        }
+        browserSelectedNodeID = newValue
       }
     )
   }
@@ -435,43 +437,67 @@ struct DesktopRootView: View {
     tabStore.selectedTab
   }
 
-  private var selectedNode: TeleportNode? {
-    let selectedNodeID = activeTab?.selectedNodeID ?? browserSelectedNodeID
-
-    guard let selectedNodeID else {
+  private var sidebarSelectedNode: TeleportNode? {
+    guard let browserSelectedNodeID else {
       return nil
     }
 
-    return store.nodes.first { $0.id == selectedNodeID }
+    return store.nodes.first { $0.id == browserSelectedNodeID }
   }
 
-  private var selectedLogin: String? {
-    guard let selectedNode else {
+  private var activeTabNode: TeleportNode? {
+    guard let activeTab else {
       return nil
     }
 
-    return resolvedLogin(for: selectedNode)
-  }
+    let nodeID = activeTab.terminalStore.connectedNodeID ?? activeTab.selectedNodeID
 
-  private var isSelectedNodeConnectedInApp: Bool {
-    guard let selectedNode else {
-      return false
+    guard let nodeID else {
+      return nil
     }
 
-    return activeTab?.terminalStore.connectedNodeID == selectedNode.id
+    return store.nodes.first { $0.id == nodeID }
+  }
+
+  private var detailNode: TeleportNode? {
+    activeTabNode ?? sidebarSelectedNode
+  }
+
+  private var detailLogin: String? {
+    guard let detailNode else {
+      return nil
+    }
+
+    return resolvedLogin(for: detailNode)
+  }
+
+  private var actionNode: TeleportNode? {
+    activeTabNode ?? sidebarSelectedNode
+  }
+
+  private var actionLogin: String? {
+    guard let actionNode else {
+      return nil
+    }
+
+    return resolvedLogin(for: actionNode)
+  }
+
+  private var isActiveTabConnected: Bool {
+    activeTab?.terminalStore.connectedNodeID != nil
   }
 
   private var detailTitle: String {
-    if let selectedNode {
-      return selectedNode.hostname
+    if let detailNode {
+      return detailNode.hostname
     }
 
     return activeTab?.terminalStore.currentTitle ?? "Select a Server"
   }
 
   private var detailSubtitle: String {
-    if let selectedNode, let groupingKey = settings.normalizedGroupingLabelKey {
-      let groupValue = selectedNode.groupValue(for: groupingKey)
+    if let detailNode, let groupingKey = settings.normalizedGroupingLabelKey {
+      let groupValue = detailNode.groupValue(for: groupingKey)
 
       if groupValue != "Ungrouped" {
         return groupValue
@@ -517,6 +543,7 @@ struct DesktopRootView: View {
         connectedNodeID: node.id
       )
     )
+    requestTerminalFocus()
   }
 
   private func connectSelectionToNewTab(_ selectedIDs: Set<String>) {
@@ -584,6 +611,14 @@ struct DesktopRootView: View {
     browserSelectedNodeID = filteredNodes[0].id
   }
 
+  private func syncSidebarSelectionToActiveTab() {
+    guard let selectedNodeID = activeTab?.selectedNodeID else {
+      return
+    }
+
+    browserSelectedNodeID = selectedNodeID
+  }
+
   private func closeTab(_ tab: DesktopTab) {
     browserSelectedNodeID = tab.selectedNodeID
     _ = tabStore.closeTab(id: tab.id)
@@ -604,6 +639,10 @@ struct DesktopRootView: View {
 
   private func selectNextTabFromShortcut() -> Bool {
     tabStore.selectNextTab()
+  }
+
+  private func requestTerminalFocus() {
+    terminalFocusToken += 1
   }
 }
 
@@ -647,11 +686,11 @@ private struct DesktopTabPillView: View {
       .padding(.trailing, 6)
     }
     .background(
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
+      Capsule()
         .fill(isSelected ? AnyShapeStyle(.quinary) : AnyShapeStyle(Color.clear))
     )
     .overlay(
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
+      Capsule()
         .strokeBorder(
           isSelected ? AnyShapeStyle(.quaternary) : AnyShapeStyle(Color.clear),
           lineWidth: 1
