@@ -32,6 +32,10 @@ final class TerminalSessionStore {
     terminalController.install(request)
   }
 
+  func showSearch() {
+    terminalController.showSearch()
+  }
+
   func processTerminated(exitCode: Int32?) {
     lastExitStatus = exitCode
     connectedNodeID = nil

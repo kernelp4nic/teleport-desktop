@@ -26,7 +26,8 @@ struct DesktopRootView: View {
         title: "Teleport Desktop",
         onCloseTab: closeSelectedTabFromShortcut,
         onSelectPreviousTab: selectPreviousTabFromShortcut,
-        onSelectNextTab: selectNextTabFromShortcut
+        onSelectNextTab: selectNextTabFromShortcut,
+        onShowSearch: showSearchFromShortcut
       )
     )
     .toolbar {
@@ -50,6 +51,13 @@ struct DesktopRootView: View {
         } label: {
           Label("Login", systemImage: "person.badge.key")
         }
+
+        Button {
+          showTerminalSearch()
+        } label: {
+          Label("Find", systemImage: "magnifyingglass")
+        }
+        .disabled(activeTab == nil)
 
         Button {
           NSApp.activate(ignoringOtherApps: true)
@@ -641,6 +649,19 @@ struct DesktopRootView: View {
 
   private func requestTerminalFocus() {
     terminalFocusToken += 1
+  }
+
+  private func showTerminalSearch() {
+    activeTab?.terminalStore.showSearch()
+  }
+
+  private func showSearchFromShortcut() -> Bool {
+    guard activeTab != nil else {
+      return false
+    }
+
+    showTerminalSearch()
+    return true
   }
 }
 

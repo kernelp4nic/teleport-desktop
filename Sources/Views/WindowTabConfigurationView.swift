@@ -6,12 +6,14 @@ struct WindowTabConfigurationView: NSViewRepresentable {
   let onCloseTab: () -> Bool
   let onSelectPreviousTab: () -> Bool
   let onSelectNextTab: () -> Bool
+  let onShowSearch: () -> Bool
 
   func makeCoordinator() -> Coordinator {
     Coordinator(
       onCloseTab: onCloseTab,
       onSelectPreviousTab: onSelectPreviousTab,
-      onSelectNextTab: onSelectNextTab
+      onSelectNextTab: onSelectNextTab,
+      onShowSearch: onShowSearch
     )
   }
 
@@ -23,6 +25,7 @@ struct WindowTabConfigurationView: NSViewRepresentable {
     context.coordinator.onCloseTab = onCloseTab
     context.coordinator.onSelectPreviousTab = onSelectPreviousTab
     context.coordinator.onSelectNextTab = onSelectNextTab
+    context.coordinator.onShowSearch = onShowSearch
 
     DispatchQueue.main.async {
       guard let window = nsView.window else {
@@ -42,6 +45,7 @@ extension WindowTabConfigurationView {
     var onCloseTab: () -> Bool
     var onSelectPreviousTab: () -> Bool
     var onSelectNextTab: () -> Bool
+    var onShowSearch: () -> Bool
 
     private weak var window: NSWindow?
     private var monitor: Any?
@@ -49,11 +53,13 @@ extension WindowTabConfigurationView {
     init(
       onCloseTab: @escaping () -> Bool,
       onSelectPreviousTab: @escaping () -> Bool,
-      onSelectNextTab: @escaping () -> Bool
+      onSelectNextTab: @escaping () -> Bool,
+      onShowSearch: @escaping () -> Bool
     ) {
       self.onCloseTab = onCloseTab
       self.onSelectPreviousTab = onSelectPreviousTab
       self.onSelectNextTab = onSelectNextTab
+      self.onShowSearch = onShowSearch
     }
 
     deinit {
@@ -88,6 +94,11 @@ extension WindowTabConfigurationView {
         if flags == [.command],
            event.charactersIgnoringModifiers?.lowercased() == "w" {
           return self.onCloseTab() ? nil : event
+        }
+
+        if flags == [.command],
+           event.charactersIgnoringModifiers?.lowercased() == "f" {
+          return self.onShowSearch() ? nil : event
         }
 
         if flags.contains(.command),
