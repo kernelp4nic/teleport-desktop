@@ -263,9 +263,7 @@ struct DesktopRootView: View {
           Spacer()
 
           if isActiveTabConnected {
-            Label("Connected in This Tab", systemImage: "checkmark.circle.fill")
-              .font(.caption.weight(.medium))
-              .foregroundStyle(.secondary)
+            ConnectedStatusBadge()
           } else {
             HStack(spacing: 10) {
               Button("Connect") {
@@ -649,6 +647,26 @@ struct DesktopRootView: View {
 private struct DesktopServerSection {
   let title: String
   let nodes: [TeleportNode]
+}
+
+private struct ConnectedStatusBadge: View {
+  var body: some View {
+    HStack(spacing: 6) {
+      Circle()
+        .fill(Color.green)
+        .frame(width: 8, height: 8)
+
+      Text("Connected")
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.secondary)
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 6)
+    .background(
+      Capsule()
+        .fill(.quaternary.opacity(0.35))
+    )
+  }
 }
 
 private struct DesktopTabPillView: View {
