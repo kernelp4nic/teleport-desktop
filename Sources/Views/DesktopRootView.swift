@@ -272,8 +272,8 @@ struct DesktopRootView: View {
 
           Spacer()
 
-          if isActiveTabConnected {
-            ConnectedStatusBadge()
+          if let connectionBadgeState = activeConnectionBadgeState {
+            ConnectionStatusBadge(state: connectionBadgeState)
           } else {
             HStack(spacing: 10) {
               Button("Connect") {
@@ -491,8 +491,17 @@ struct DesktopRootView: View {
     return resolvedLogin(for: actionNode)
   }
 
-  private var isActiveTabConnected: Bool {
-    activeTab?.terminalStore.connectedNodeID != nil
+  private var activeConnectionBadgeState: TerminalConnectionState? {
+    guard let activeTab else {
+      return nil
+    }
+
+    switch activeTab.terminalStore.connectionState {
+    case .connecting, .connected:
+      return activeTab.terminalStore.connectionState
+    case .idle, .disconnected:
+      return nil
+    }
   }
 
   private var detailTitle: String {
@@ -698,14 +707,16 @@ private struct DesktopServerSection {
   let nodes: [TeleportNode]
 }
 
-private struct ConnectedStatusBadge: View {
+private struct ConnectionStatusBadge: View {
+  let state: TerminalConnectionState
+
   var body: some View {
     HStack(spacing: 6) {
       Circle()
-        .fill(Color.green)
+        .fill(indicatorColor)
         .frame(width: 8, height: 8)
 
-      Text("Connected")
+      Text(labelText)
         .font(.caption.weight(.medium))
         .foregroundStyle(.secondary)
     }
@@ -715,6 +726,28 @@ private struct ConnectedStatusBadge: View {
       Capsule()
         .fill(.quaternary.opacity(0.35))
     )
+  }
+
+  private var labelText: String {
+    switch state {
+    case .connecting:
+      return "Connecting"
+    case .connected:
+      return "Connected"
+    case .idle, .disconnected:
+      return ""
+    }
+  }
+
+  private var indicatorColor: Color {
+    switch state {
+    case .connecting:
+      return .yellow
+    case .connected:
+      return .green
+    case .idle, .disconnected:
+      return .secondary
+    }
   }
 }
 

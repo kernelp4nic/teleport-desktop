@@ -1,6 +1,13 @@
 import Foundation
 import Observation
 
+enum TerminalConnectionState: Equatable {
+  case idle
+  case connecting
+  case connected
+  case disconnected
+}
+
 @MainActor
 @Observable
 final class TerminalSessionStore {
@@ -8,6 +15,7 @@ final class TerminalSessionStore {
   var statusMessage: String
   var currentTitle: String
   var connectedNodeID: String?
+  var connectionState: TerminalConnectionState
   var lastExitStatus: Int32?
   @ObservationIgnored let terminalController: TerminalProcessController
 
@@ -16,11 +24,15 @@ final class TerminalSessionStore {
     statusMessage = windowState.request.summary
     currentTitle = windowState.request.title
     connectedNodeID = windowState.connectedNodeID
+    connectionState = Self.initialConnectionState(for: windowState.connectedNodeID)
     terminalController = TerminalProcessController()
-    terminalController.install(request)
+    terminalController.onProcessOutput = { [weak self] in
+      self?.markConnectedIfNeeded()
+    }
     terminalController.onProcessTerminated = { [weak self] exitCode in
       self?.processTerminated(exitCode: exitCode)
     }
+    terminalController.install(request)
   }
 
   func run(request: EmbeddedTerminalRequest, connectedNodeID: String?) {
@@ -28,6 +40,7 @@ final class TerminalSessionStore {
     statusMessage = request.summary
     currentTitle = request.title
     self.connectedNodeID = connectedNodeID
+    connectionState = Self.initialConnectionState(for: connectedNodeID)
     lastExitStatus = nil
     terminalController.install(request)
   }
@@ -44,14 +57,27 @@ final class TerminalSessionStore {
     terminalController.findPrevious()
   }
 
+  func markConnectedIfNeeded() {
+    guard connectionState == .connecting else {
+      return
+    }
+
+    connectionState = .connected
+  }
+
   func processTerminated(exitCode: Int32?) {
     lastExitStatus = exitCode
     connectedNodeID = nil
+    connectionState = .disconnected
 
     if let exitCode {
       statusMessage = "Terminal session ended with status \(exitCode)"
     } else {
       statusMessage = "Terminal session closed"
     }
+  }
+
+  private static func initialConnectionState(for connectedNodeID: String?) -> TerminalConnectionState {
+    connectedNodeID == nil ? .idle : .connecting
   }
 }

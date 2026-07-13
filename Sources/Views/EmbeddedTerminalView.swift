@@ -23,7 +23,9 @@ struct EmbeddedTerminalView: NSViewRepresentable {
 final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTerminalViewDelegate {
   let hostView = TerminalHostView()
   var onProcessTerminated: (@MainActor (Int32?) -> Void)?
+  var onProcessOutput: (@MainActor () -> Void)?
   private var lastRequestID: UUID?
+  private var didReportInitialOutput = false
 
   func install(_ request: EmbeddedTerminalRequest) {
     guard lastRequestID != request.id || hostView.terminalView == nil else {
@@ -31,7 +33,10 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
     }
 
     lastRequestID = request.id
-    hostView.launch(request: request, delegate: self)
+    didReportInitialOutput = false
+    hostView.launch(request: request, delegate: self) { [weak self] in
+      self?.handleInitialOutput()
+    }
   }
 
   func showSearch() {
@@ -57,6 +62,19 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
 
     Task { @MainActor in
       onProcessTerminated?(exitCode)
+    }
+  }
+
+  private func handleInitialOutput() {
+    guard !didReportInitialOutput else {
+      return
+    }
+
+    didReportInitialOutput = true
+    let onProcessOutput = onProcessOutput
+
+    Task { @MainActor in
+      onProcessOutput?()
     }
   }
 }
@@ -97,9 +115,25 @@ final class TerminalContainerView: NSView {
   }
 }
 
+final class ObservedLocalProcessTerminalView: LocalProcessTerminalView {
+  var onFirstOutput: (() -> Void)?
+  private var didReceiveOutput = false
+
+  override func dataReceived(slice: ArraySlice<UInt8>) {
+    super.dataReceived(slice: slice)
+
+    guard !didReceiveOutput, !slice.isEmpty else {
+      return
+    }
+
+    didReceiveOutput = true
+    onFirstOutput?()
+  }
+}
+
 final class TerminalHostView: NSView {
   private let contentInset: CGFloat = 12
-  private(set) var terminalView: LocalProcessTerminalView?
+  private(set) var terminalView: ObservedLocalProcessTerminalView?
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -119,14 +153,15 @@ final class TerminalHostView: NSView {
 
   func launch(
     request: EmbeddedTerminalRequest,
-    delegate: LocalProcessTerminalViewDelegate
+    delegate: LocalProcessTerminalViewDelegate,
+    onFirstOutput: @escaping () -> Void
   ) {
     if let terminalView {
       terminalView.terminate()
       terminalView.removeFromSuperview()
     }
 
-    let terminalView = LocalProcessTerminalView(
+    let terminalView = ObservedLocalProcessTerminalView(
       frame: bounds.insetBy(dx: contentInset, dy: contentInset)
     )
     terminalView.translatesAutoresizingMaskIntoConstraints = false
@@ -134,6 +169,7 @@ final class TerminalHostView: NSView {
     terminalView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
     terminalView.caretColor = .controlAccentColor
     terminalView.processDelegate = delegate
+    terminalView.onFirstOutput = onFirstOutput
 
     addSubview(terminalView)
 
