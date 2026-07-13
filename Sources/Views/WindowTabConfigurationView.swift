@@ -7,13 +7,17 @@ struct WindowTabConfigurationView: NSViewRepresentable {
   let onSelectPreviousTab: () -> Bool
   let onSelectNextTab: () -> Bool
   let onShowSearch: () -> Bool
+  let onFindNext: () -> Bool
+  let onFindPrevious: () -> Bool
 
   func makeCoordinator() -> Coordinator {
     Coordinator(
       onCloseTab: onCloseTab,
       onSelectPreviousTab: onSelectPreviousTab,
       onSelectNextTab: onSelectNextTab,
-      onShowSearch: onShowSearch
+      onShowSearch: onShowSearch,
+      onFindNext: onFindNext,
+      onFindPrevious: onFindPrevious
     )
   }
 
@@ -26,6 +30,8 @@ struct WindowTabConfigurationView: NSViewRepresentable {
     context.coordinator.onSelectPreviousTab = onSelectPreviousTab
     context.coordinator.onSelectNextTab = onSelectNextTab
     context.coordinator.onShowSearch = onShowSearch
+    context.coordinator.onFindNext = onFindNext
+    context.coordinator.onFindPrevious = onFindPrevious
 
     DispatchQueue.main.async {
       guard let window = nsView.window else {
@@ -46,6 +52,8 @@ extension WindowTabConfigurationView {
     var onSelectPreviousTab: () -> Bool
     var onSelectNextTab: () -> Bool
     var onShowSearch: () -> Bool
+    var onFindNext: () -> Bool
+    var onFindPrevious: () -> Bool
 
     private weak var window: NSWindow?
     private var monitor: Any?
@@ -54,12 +62,16 @@ extension WindowTabConfigurationView {
       onCloseTab: @escaping () -> Bool,
       onSelectPreviousTab: @escaping () -> Bool,
       onSelectNextTab: @escaping () -> Bool,
-      onShowSearch: @escaping () -> Bool
+      onShowSearch: @escaping () -> Bool,
+      onFindNext: @escaping () -> Bool,
+      onFindPrevious: @escaping () -> Bool
     ) {
       self.onCloseTab = onCloseTab
       self.onSelectPreviousTab = onSelectPreviousTab
       self.onSelectNextTab = onSelectNextTab
       self.onShowSearch = onShowSearch
+      self.onFindNext = onFindNext
+      self.onFindPrevious = onFindPrevious
     }
 
     deinit {
@@ -99,6 +111,16 @@ extension WindowTabConfigurationView {
         if flags == [.command],
            event.charactersIgnoringModifiers?.lowercased() == "f" {
           return self.onShowSearch() ? nil : event
+        }
+
+        if flags == [.command],
+           event.charactersIgnoringModifiers?.lowercased() == "g" {
+          return self.onFindNext() ? nil : event
+        }
+
+        if flags == [.command, .shift],
+           event.charactersIgnoringModifiers?.lowercased() == "g" {
+          return self.onFindPrevious() ? nil : event
         }
 
         if flags.contains(.command),

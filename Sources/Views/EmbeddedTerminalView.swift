@@ -38,6 +38,14 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
     hostView.showSearch()
   }
 
+  func findNext() {
+    hostView.findNext()
+  }
+
+  func findPrevious() {
+    hostView.findPrevious()
+  }
+
   func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
 
   func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
@@ -162,6 +170,24 @@ final class TerminalHostView: NSView {
 
     let menuItem = NSMenuItem()
     menuItem.tag = NSTextFinder.Action.showFindInterface.rawValue
+    terminalView.performTextFinderAction(menuItem)
+  }
+
+  func findNext() {
+    performTextFinderAction(.nextMatch)
+  }
+
+  func findPrevious() {
+    performTextFinderAction(.previousMatch)
+  }
+
+  private func performTextFinderAction(_ action: NSTextFinder.Action) {
+    guard let terminalView else {
+      return
+    }
+
+    let menuItem = NSMenuItem()
+    menuItem.tag = action.rawValue
     terminalView.performTextFinderAction(menuItem)
   }
 

@@ -27,7 +27,9 @@ struct DesktopRootView: View {
         onCloseTab: closeSelectedTabFromShortcut,
         onSelectPreviousTab: selectPreviousTabFromShortcut,
         onSelectNextTab: selectNextTabFromShortcut,
-        onShowSearch: showSearchFromShortcut
+        onShowSearch: showSearchFromShortcut,
+        onFindNext: findNextFromShortcut,
+        onFindPrevious: findPreviousFromShortcut
       )
     )
     .toolbar {
@@ -655,12 +657,38 @@ struct DesktopRootView: View {
     activeTab?.terminalStore.showSearch()
   }
 
+  private func findNextSearchResult() {
+    activeTab?.terminalStore.findNext()
+  }
+
+  private func findPreviousSearchResult() {
+    activeTab?.terminalStore.findPrevious()
+  }
+
   private func showSearchFromShortcut() -> Bool {
     guard activeTab != nil else {
       return false
     }
 
     showTerminalSearch()
+    return true
+  }
+
+  private func findNextFromShortcut() -> Bool {
+    guard activeTab != nil else {
+      return false
+    }
+
+    findNextSearchResult()
+    return true
+  }
+
+  private func findPreviousFromShortcut() -> Bool {
+    guard activeTab != nil else {
+      return false
+    }
+
+    findPreviousSearchResult()
     return true
   }
 }
