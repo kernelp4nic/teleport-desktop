@@ -4,6 +4,8 @@ struct DesktopServerRowView: View {
   let node: TeleportNode
   let groupingKey: String?
   let resolvedLogin: String?
+  let isFavorite: Bool
+  let onToggleFavorite: () -> Void
 
   var body: some View {
     HStack(spacing: 10) {
@@ -20,6 +22,15 @@ struct DesktopServerRowView: View {
           .foregroundStyle(.secondary)
           .lineLimit(1)
       }
+
+      Spacer(minLength: 8)
+
+      Button(action: onToggleFavorite) {
+        Image(systemName: isFavorite ? "star.fill" : "star")
+          .foregroundStyle(isFavorite ? .yellow : .secondary)
+      }
+      .buttonStyle(.plain)
+      .help(isFavorite ? "Remove from favorites" : "Add to favorites")
     }
   }
 

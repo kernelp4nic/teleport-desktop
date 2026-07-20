@@ -17,7 +17,13 @@ final class TerminalSessionStore {
   var connectedNodeID: String?
   var connectionState: TerminalConnectionState
   var lastExitStatus: Int32?
+  @ObservationIgnored var onConnectionEstablished: (@MainActor () -> Void)? {
+    didSet {
+      notifyConnectionEstablishedIfNeeded()
+    }
+  }
   @ObservationIgnored let terminalController: TerminalProcessController
+  @ObservationIgnored private var didNotifyConnectionEstablished = false
 
   init(windowState: DesktopWindowState) {
     request = windowState.request
@@ -25,6 +31,7 @@ final class TerminalSessionStore {
     currentTitle = windowState.request.title
     connectedNodeID = windowState.connectedNodeID
     connectionState = Self.initialConnectionState(for: windowState.connectedNodeID)
+    onConnectionEstablished = nil
     terminalController = TerminalProcessController()
     terminalController.onProcessOutput = { [weak self] in
       self?.markConnectedIfNeeded()
@@ -42,6 +49,7 @@ final class TerminalSessionStore {
     self.connectedNodeID = connectedNodeID
     connectionState = Self.initialConnectionState(for: connectedNodeID)
     lastExitStatus = nil
+    didNotifyConnectionEstablished = false
     terminalController.install(request)
   }
 
@@ -63,6 +71,7 @@ final class TerminalSessionStore {
     }
 
     connectionState = .connected
+    notifyConnectionEstablishedIfNeeded()
   }
 
   func processTerminated(exitCode: Int32?) {
@@ -79,5 +88,16 @@ final class TerminalSessionStore {
 
   private static func initialConnectionState(for connectedNodeID: String?) -> TerminalConnectionState {
     connectedNodeID == nil ? .idle : .connecting
+  }
+
+  private func notifyConnectionEstablishedIfNeeded() {
+    guard connectionState == .connected,
+          !didNotifyConnectionEstablished,
+          let onConnectionEstablished else {
+      return
+    }
+
+    didNotifyConnectionEstablished = true
+    onConnectionEstablished()
   }
 }

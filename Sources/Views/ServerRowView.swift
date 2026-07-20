@@ -4,7 +4,9 @@ struct ServerRowView: View {
   let node: TeleportNode
   let groupKey: String?
   let loginKey: String?
+  let isFavorite: Bool
   let resolvedLogin: String?
+  let onToggleFavorite: () -> Void
   let onConnect: () -> Void
 
   var body: some View {
@@ -36,10 +38,19 @@ struct ServerRowView: View {
 
       Spacer(minLength: 12)
 
-      Button("Connect", action: onConnect)
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
-        .disabled(resolvedLogin == nil)
+      VStack(alignment: .trailing, spacing: 8) {
+        Button(action: onToggleFavorite) {
+          Image(systemName: isFavorite ? "star.fill" : "star")
+            .foregroundStyle(isFavorite ? .yellow : .secondary)
+        }
+        .buttonStyle(.plain)
+        .help(isFavorite ? "Remove from favorites" : "Add to favorites")
+
+        Button("Connect", action: onConnect)
+          .buttonStyle(.borderedProminent)
+          .controlSize(.small)
+          .disabled(resolvedLogin == nil)
+      }
     }
     .padding(10)
     .background(

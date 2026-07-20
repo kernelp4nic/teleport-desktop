@@ -37,6 +37,47 @@ struct TerminalSessionStoreTests {
   }
 
   @MainActor
+  @Test func connectionEstablishedCallbackFiresOnceOnFirstTransitionToConnected() {
+    let windowState = DesktopWindowState.command(
+      "tsh ssh ubuntu@example",
+      title: "ubuntu@example",
+      summary: "Running tsh ssh as ubuntu",
+      selectedNodeID: "node-1",
+      connectedNodeID: "node-1"
+    )
+
+    let store = TerminalSessionStore(windowState: windowState)
+    var callbackCount = 0
+    store.onConnectionEstablished = {
+      callbackCount += 1
+    }
+
+    store.markConnectedIfNeeded()
+    store.markConnectedIfNeeded()
+
+    #expect(store.connectionState == .connected)
+    #expect(callbackCount == 1)
+  }
+
+  @MainActor
+  @Test func disconnectedOrIdleSessionsDoNotFireConnectionEstablishedCallback() {
+    let store = TerminalSessionStore(windowState: .shell())
+    var callbackCount = 0
+    store.onConnectionEstablished = {
+      callbackCount += 1
+    }
+
+    store.markConnectedIfNeeded()
+    store.processTerminated(exitCode: 1)
+    store.onConnectionEstablished = {
+      callbackCount += 1
+    }
+
+    #expect(store.connectionState == .disconnected)
+    #expect(callbackCount == 0)
+  }
+
+  @MainActor
   @Test func processTerminatedClearsConnectedNodeAndSetsStatus() {
     let windowState = DesktopWindowState.command(
       "tsh ssh ubuntu@example",
@@ -74,5 +115,29 @@ struct TerminalSessionStoreTests {
     #expect(store.connectedNodeID == nil)
     #expect(store.connectionState == .idle)
     #expect(store.lastExitStatus == nil)
+  }
+
+  @MainActor
+  @Test func callbackAssignedAfterConnectionStillFiresOnce() {
+    let windowState = DesktopWindowState.command(
+      "tsh ssh ubuntu@example",
+      title: "ubuntu@example",
+      summary: "Running tsh ssh as ubuntu",
+      selectedNodeID: "node-1",
+      connectedNodeID: "node-1"
+    )
+
+    let store = TerminalSessionStore(windowState: windowState)
+    store.markConnectedIfNeeded()
+
+    var callbackCount = 0
+    store.onConnectionEstablished = {
+      callbackCount += 1
+    }
+    store.onConnectionEstablished = {
+      callbackCount += 1
+    }
+
+    #expect(callbackCount == 1)
   }
 }

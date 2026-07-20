@@ -7,6 +7,7 @@ struct MenuBarRootView: View {
   @Environment(\.openSettings) private var openSettings
   @Bindable var store: TeleportNodeStore
   @Bindable var settings: SettingsStore
+  @Bindable var library: NodeLibraryStore
   @State private var searchText = ""
   @State private var selectedGroup = Self.allGroups
 
@@ -126,7 +127,7 @@ struct MenuBarRootView: View {
     } else {
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 14) {
-          ForEach(sections, id: \.title) { section in
+          ForEach(sections) { section in
             VStack(alignment: .leading, spacing: 8) {
               if shouldShowSectionHeaders {
                 HStack {
@@ -144,11 +145,15 @@ struct MenuBarRootView: View {
                   node: node,
                   groupKey: settings.normalizedGroupingLabelKey,
                   loginKey: settings.normalizedLoginLabelKey,
+                  isFavorite: library.isFavorite(nodeID: node.id, scopeKey: libraryScopeKey),
                   resolvedLogin: node.preferredLogin(
                     labelKey: settings.normalizedLoginLabelKey,
                     fallback: settings.normalizedFallbackLogin,
                     allowedLogins: store.session.logins
                   ),
+                  onToggleFavorite: {
+                    toggleFavorite(for: node)
+                  },
                   onConnect: {
                     Task {
                       dismiss()
@@ -240,6 +245,10 @@ struct MenuBarRootView: View {
     }
   }
 
+  private var libraryScopeKey: String {
+    library.scopeKey(session: store.session, settings: settings)
+  }
+
   private var groupValues: [String] {
     guard let groupingKey = settings.normalizedGroupingLabelKey else {
       return []
@@ -255,33 +264,77 @@ struct MenuBarRootView: View {
     }
   }
 
+  private var favoriteNodes: [TeleportNode] {
+    filteredNodes
+      .filter { library.isFavorite(nodeID: $0.id, scopeKey: libraryScopeKey) }
+      .sorted { lhs, rhs in
+        lhs.hostname.localizedCaseInsensitiveCompare(rhs.hostname) == .orderedAscending
+      }
+  }
+
+  private var recentNodes: [TeleportNode] {
+    let nodesByID = Dictionary(uniqueKeysWithValues: filteredNodes.map { ($0.id, $0) })
+    let favoriteNodeIDs = Set(favoriteNodes.map(\.id))
+
+    return library.recentNodeIDs(scopeKey: libraryScopeKey).compactMap { nodeID in
+      guard !favoriteNodeIDs.contains(nodeID) else {
+        return nil
+      }
+
+      return nodesByID[nodeID]
+    }
+  }
+
   private var sections: [ServerSection] {
+    var visibleSections: [ServerSection] = []
+
+    if !favoriteNodes.isEmpty {
+      visibleSections.append(ServerSection(id: "favorites", title: "Favorites", nodes: favoriteNodes))
+    }
+
+    if !recentNodes.isEmpty {
+      visibleSections.append(ServerSection(id: "recent", title: "Recent", nodes: recentNodes))
+    }
+
     guard let groupingKey = settings.normalizedGroupingLabelKey else {
-      return [ServerSection(title: "Servers", nodes: filteredNodes)]
+      if !filteredNodes.isEmpty {
+        visibleSections.append(ServerSection(id: "servers", title: "Servers", nodes: filteredNodes))
+      }
+      return visibleSections
     }
 
     let grouped = Dictionary(grouping: filteredNodes) { node in
       node.groupValue(for: groupingKey)
     }
 
-    return grouped.keys
-      .sorted { lhs, rhs in
-        lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
-      }
-      .map { key in
-        ServerSection(
-          title: key,
-          nodes: grouped[key, default: []]
-        )
-      }
+    visibleSections.append(
+      contentsOf: grouped.keys
+        .sorted { lhs, rhs in
+          lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+        .map { key in
+          ServerSection(
+            id: "group:\(key)",
+            title: key,
+            nodes: grouped[key, default: []]
+          )
+        }
+    )
+
+    return visibleSections
   }
 
   private var shouldShowSectionHeaders: Bool {
-    settings.normalizedGroupingLabelKey != nil && sections.count > 1
+    sections.count > 1 || !favoriteNodes.isEmpty || !recentNodes.isEmpty
+  }
+
+  private func toggleFavorite(for node: TeleportNode) {
+    library.toggleFavorite(nodeID: node.id, scopeKey: libraryScopeKey)
   }
 }
 
-private struct ServerSection {
+private struct ServerSection: Identifiable {
+  let id: String
   let title: String
   let nodes: [TeleportNode]
 }

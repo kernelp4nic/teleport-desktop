@@ -6,9 +6,16 @@ struct DesktopRootView: View {
   @Environment(\.openSettings) private var openSettings
   @Bindable var store: TeleportNodeStore
   @Bindable var settings: SettingsStore
+  @Bindable var library: NodeLibraryStore
   @SceneStorage("desktop.searchText") private var searchText = ""
   @SceneStorage("desktop.selectedGroup") private var selectedGroup = Self.allGroups
   @State private var browserSelectedNodeID: String?
+  @State private var fileTransferDirection: FileTransferDirection?
+  @State private var fileTransferMessage: String?
+  @State private var fileTransferToastMessage: String?
+  @State private var isTransferringFile = false
+  @State private var remoteFilePath = "~/"
+  @State private var uploadURLs: [URL] = []
   @State private var terminalFocusToken = 0
   @State private var tabStore = DesktopTabStore()
 
@@ -32,6 +39,14 @@ struct DesktopRootView: View {
         onFindPrevious: findPreviousFromShortcut
       )
     )
+    .overlay(alignment: .bottomTrailing) {
+      if let fileTransferToastMessage {
+        FileTransferToast(message: fileTransferToastMessage)
+          .padding(20)
+          .transition(.move(edge: .trailing).combined(with: .opacity))
+      }
+    }
+    .animation(.easeInOut(duration: 0.2), value: fileTransferToastMessage)
     .toolbar {
       ToolbarItem(placement: .principal) {
         toolbarTabStrip
@@ -101,6 +116,18 @@ struct DesktopRootView: View {
       syncSidebarSelectionToActiveTab()
       reconcileSelection()
       requestTerminalFocus()
+    }
+    .sheet(item: $fileTransferDirection) { direction in
+      FileTransferView(
+        direction: direction,
+        remotePath: $remoteFilePath,
+        uploadURLs: uploadURLs,
+        isTransferring: isTransferringFile,
+        message: fileTransferMessage,
+        onChooseFiles: chooseUploadFiles,
+        onChooseDownloadDirectory: downloadFile,
+        onUpload: uploadFiles
+      )
     }
   }
 
@@ -196,13 +223,17 @@ struct DesktopRootView: View {
           .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
           List(selection: selectedNodeBinding) {
-            ForEach(sections, id: \.title) { section in
+            ForEach(sections) { section in
               Section {
                 ForEach(section.nodes) { node in
                   DesktopServerRowView(
                     node: node,
                     groupingKey: settings.normalizedGroupingLabelKey,
-                    resolvedLogin: resolvedLogin(for: node)
+                    resolvedLogin: resolvedLogin(for: node),
+                    isFavorite: library.isFavorite(nodeID: node.id, scopeKey: libraryScopeKey),
+                    onToggleFavorite: {
+                      toggleFavorite(for: node)
+                    }
                   )
                   .tag(node.id)
                   .contentShape(Rectangle())
@@ -273,7 +304,25 @@ struct DesktopRootView: View {
           Spacer()
 
           if let connectionBadgeState = activeConnectionBadgeState {
-            ConnectionStatusBadge(state: connectionBadgeState)
+            HStack(spacing: 10) {
+              if connectionBadgeState == .connected {
+                Button {
+                  prepareUpload()
+                } label: {
+                  Label("Upload Files", systemImage: "arrow.up.to.line")
+                }
+                .help("Upload files")
+
+                Button {
+                  prepareDownload()
+                } label: {
+                  Label("Download File", systemImage: "arrow.down.to.line")
+                }
+                .help("Download file")
+              }
+
+              ConnectionStatusBadge(state: connectionBadgeState)
+            }
           } else {
             HStack(spacing: 10) {
               Button("Connect") {
@@ -341,6 +390,18 @@ struct DesktopRootView: View {
               .strokeBorder(.quaternary, lineWidth: 1)
           )
           .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else if store.session.state != .active {
+        ContentUnavailableView {
+          Label("Teleport Login Required", systemImage: "person.badge.key")
+        } description: {
+          Text("Open a terminal tab to authenticate with Teleport.")
+        } actions: {
+          Button("Login in Terminal") {
+            openLoginInApp()
+          }
+          .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
         ContentUnavailableView(
           "No Active Connection",
@@ -412,6 +473,10 @@ struct DesktopRootView: View {
     }
   }
 
+  private var libraryScopeKey: String {
+    library.scopeKey(session: store.session, settings: settings)
+  }
+
   private var groupValues: [String] {
     guard let groupingKey = settings.normalizedGroupingLabelKey else {
       return []
@@ -423,22 +488,66 @@ struct DesktopRootView: View {
       }
   }
 
+  private var favoriteNodes: [TeleportNode] {
+    filteredNodes
+      .filter { library.isFavorite(nodeID: $0.id, scopeKey: libraryScopeKey) }
+      .sorted { lhs, rhs in
+        lhs.hostname.localizedCaseInsensitiveCompare(rhs.hostname) == .orderedAscending
+      }
+  }
+
+  private var recentNodes: [TeleportNode] {
+    let nodesByID = Dictionary(uniqueKeysWithValues: filteredNodes.map { ($0.id, $0) })
+    let favoriteNodeIDs = Set(favoriteNodes.map(\.id))
+
+    return library.recentNodeIDs(scopeKey: libraryScopeKey).compactMap { nodeID in
+      guard !favoriteNodeIDs.contains(nodeID) else {
+        return nil
+      }
+
+      return nodesByID[nodeID]
+    }
+  }
+
   private var sections: [DesktopServerSection] {
+    var visibleSections: [DesktopServerSection] = []
+
+    if !favoriteNodes.isEmpty {
+      visibleSections.append(
+        DesktopServerSection(id: "favorites", title: "Favorites", nodes: favoriteNodes)
+      )
+    }
+
+    if !recentNodes.isEmpty {
+      visibleSections.append(
+        DesktopServerSection(id: "recent", title: "Recent", nodes: recentNodes)
+      )
+    }
+
     guard let groupingKey = settings.normalizedGroupingLabelKey else {
-      return [DesktopServerSection(title: "Servers", nodes: filteredNodes)]
+      if !filteredNodes.isEmpty {
+        visibleSections.append(
+          DesktopServerSection(id: "servers", title: "Servers", nodes: filteredNodes)
+        )
+      }
+      return visibleSections
     }
 
     let grouped = Dictionary(grouping: filteredNodes) { node in
       node.groupValue(for: groupingKey)
     }
 
-    return grouped.keys
-      .sorted { lhs, rhs in
-        lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
-      }
-      .map { key in
-        DesktopServerSection(title: key, nodes: grouped[key, default: []])
-      }
+    visibleSections.append(
+      contentsOf: grouped.keys
+        .sorted { lhs, rhs in
+          lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+        .map { key in
+          DesktopServerSection(id: "group:\(key)", title: key, nodes: grouped[key, default: []])
+        }
+    )
+
+    return visibleSections
   }
 
   private var activeTab: DesktopTab? {
@@ -551,13 +660,30 @@ struct DesktopRootView: View {
     browserSelectedNodeID = node.id
 
     let login = resolvedLogin(for: node) ?? "unknown"
-    _ = tabStore.openTab(
+    let scopeKey = libraryScopeKey
+    let tab = tabStore.openTab(
       windowState: DesktopWindowState.command(
         command,
         title: "\(login)@\(node.hostname)",
         summary: "Running tsh ssh as \(login)",
         selectedNodeID: node.id,
         connectedNodeID: node.id
+      )
+    )
+    tab.terminalStore.onConnectionEstablished = { [library] in
+      library.recordRecent(nodeID: node.id, scopeKey: scopeKey)
+    }
+    requestTerminalFocus()
+  }
+
+  private func openLoginInApp() {
+    let command = store.loginCommand(using: settings)
+
+    _ = tabStore.openTab(
+      windowState: DesktopWindowState.command(
+        command,
+        title: "Teleport Login",
+        summary: "Running tsh login in the embedded terminal"
       )
     )
     requestTerminalFocus()
@@ -597,6 +723,10 @@ struct DesktopRootView: View {
 
   private func openNodeExternally(_ node: TeleportNode) {
     store.connect(to: node, settings: settings)
+  }
+
+  private func toggleFavorite(for node: TeleportNode) {
+    library.toggleFavorite(nodeID: node.id, scopeKey: libraryScopeKey)
   }
 
   private func reconcileSelection() {
@@ -700,9 +830,229 @@ struct DesktopRootView: View {
     findPreviousSearchResult()
     return true
   }
+
+  private func prepareUpload() {
+    remoteFilePath = "~/"
+    uploadURLs = []
+    fileTransferMessage = nil
+    fileTransferDirection = .upload
+  }
+
+  private func prepareDownload() {
+    remoteFilePath = "~/"
+    fileTransferMessage = nil
+    fileTransferDirection = .download
+  }
+
+  private func chooseUploadFiles() {
+    let panel = NSOpenPanel()
+    panel.allowsMultipleSelection = true
+    panel.canChooseDirectories = false
+    panel.canChooseFiles = true
+
+    guard panel.runModal() == .OK else {
+      return
+    }
+
+    uploadURLs = panel.urls
+  }
+
+  private func uploadFiles() {
+    guard !uploadURLs.isEmpty,
+          let transferTarget else {
+      return
+    }
+
+    let urls = uploadURLs
+    let remotePath = remoteFilePath
+    isTransferringFile = true
+    fileTransferMessage = "Uploading \(urls.count) file\(urls.count == 1 ? "" : "s")…"
+
+    Task {
+      do {
+        try await TeleportFileTransferService().upload(
+          localURLs: urls,
+          remotePath: remotePath,
+          login: transferTarget.login,
+          hostname: transferTarget.hostname
+        )
+        fileTransferDirection = nil
+        showFileTransferToast("Upload complete")
+      } catch {
+        fileTransferMessage = error.localizedDescription
+      }
+
+      isTransferringFile = false
+    }
+  }
+
+  private func downloadFile() {
+    guard let transferTarget else {
+      return
+    }
+
+    let panel = NSOpenPanel()
+    panel.prompt = "Download Here"
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = false
+    panel.canCreateDirectories = true
+
+    guard panel.runModal() == .OK,
+          let localDirectoryURL = panel.url else {
+      return
+    }
+
+    let remotePath = remoteFilePath
+    isTransferringFile = true
+    fileTransferMessage = "Downloading file…"
+
+    Task {
+      do {
+        try await TeleportFileTransferService().download(
+          remotePath: remotePath,
+          localDirectoryURL: localDirectoryURL,
+          login: transferTarget.login,
+          hostname: transferTarget.hostname
+        )
+        fileTransferDirection = nil
+        showFileTransferToast("Download complete")
+      } catch {
+        fileTransferMessage = error.localizedDescription
+      }
+
+      isTransferringFile = false
+    }
+  }
+
+  private var transferTarget: (login: String, hostname: String)? {
+    guard activeConnectionBadgeState == .connected,
+          let node = activeTabNode,
+          let login = resolvedLogin(for: node) else {
+      return nil
+    }
+
+    return (login, node.hostname)
+  }
+
+  private func showFileTransferToast(_ message: String) {
+    fileTransferToastMessage = message
+
+    Task {
+      try? await Task.sleep(for: .seconds(3))
+
+      if fileTransferToastMessage == message {
+        fileTransferToastMessage = nil
+      }
+    }
+  }
 }
 
-private struct DesktopServerSection {
+private enum FileTransferDirection: String, Identifiable {
+  case upload
+  case download
+
+  var id: String {
+    rawValue
+  }
+}
+
+private struct FileTransferView: View {
+  let direction: FileTransferDirection
+  @Binding var remotePath: String
+  let uploadURLs: [URL]
+  let isTransferring: Bool
+  let message: String?
+  let onChooseFiles: () -> Void
+  let onChooseDownloadDirectory: () -> Void
+  let onUpload: () -> Void
+
+  var body: some View {
+    VStack(spacing: 18) {
+      Text(direction == .upload ? "Upload Files" : "Download File")
+        .font(.headline)
+
+      TextField(
+        direction == .upload ? "Upload destination" : "Remote file path",
+        text: $remotePath
+      )
+      .textFieldStyle(.roundedBorder)
+
+      if direction == .upload {
+        Button(action: onChooseFiles) {
+          VStack(spacing: 8) {
+            Image(systemName: uploadURLs.isEmpty ? "doc.badge.plus" : "checkmark.circle.fill")
+              .font(.title2)
+
+            Text(uploadButtonTitle)
+          }
+          .frame(maxWidth: .infinity, minHeight: 90)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(.quaternary.opacity(0.35))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+        Button("Upload", action: onUpload)
+          .buttonStyle(.borderedProminent)
+          .disabled(uploadURLs.isEmpty || remotePathIsEmpty || isTransferring)
+      } else {
+        Button("Choose Destination and Download", action: onChooseDownloadDirectory)
+          .buttonStyle(.borderedProminent)
+          .disabled(remotePathIsEmpty || isTransferring)
+      }
+
+      if isTransferring {
+        HStack(spacing: 10) {
+          ProgressView()
+
+          if let message {
+            Text(message)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+      }
+
+      if let message, !isTransferring {
+        Text(message)
+          .font(.caption)
+          .foregroundStyle(.red)
+          .multilineTextAlignment(.center)
+      }
+    }
+    .padding(20)
+    .frame(width: 420)
+  }
+
+  private var uploadButtonTitle: String {
+    if uploadURLs.isEmpty {
+      return "Choose Files…"
+    }
+
+    return "\(uploadURLs.count) file\(uploadURLs.count == 1 ? "" : "s") selected"
+  }
+
+  private var remotePathIsEmpty: Bool {
+    remotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+}
+
+private struct FileTransferToast: View {
+  let message: String
+
+  var body: some View {
+    Label(message, systemImage: "checkmark.circle.fill")
+      .font(.callout.weight(.medium))
+      .foregroundStyle(.white)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+      .background(.green, in: Capsule())
+      .shadow(radius: 8, y: 3)
+  }
+}
+
+private struct DesktopServerSection: Identifiable {
+  let id: String
   let title: String
   let nodes: [TeleportNode]
 }
