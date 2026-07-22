@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ServerRowView: View {
   let node: TeleportNode
+  let name: String
   let groupKey: String?
   let loginKey: String?
   let isFavorite: Bool
@@ -13,7 +14,7 @@ struct ServerRowView: View {
     HStack(alignment: .top, spacing: 12) {
       VStack(alignment: .leading, spacing: 8) {
         HStack(spacing: 8) {
-          Text(node.hostname)
+          Text(name)
             .font(.headline)
             .lineLimit(1)
 

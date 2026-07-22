@@ -143,6 +143,7 @@ struct MenuBarRootView: View {
               ForEach(section.nodes) { node in
                 ServerRowView(
                   node: node,
+                  name: library.name(for: node, scopeKey: libraryScopeKey),
                   groupKey: settings.normalizedGroupingLabelKey,
                   loginKey: settings.normalizedLoginLabelKey,
                   isFavorite: library.isFavorite(nodeID: node.id, scopeKey: libraryScopeKey),
@@ -233,7 +234,10 @@ struct MenuBarRootView: View {
 
   private var filteredNodes: [TeleportNode] {
     store.nodes.filter { node in
-      guard node.matches(searchText: searchText) else {
+      guard node.matches(
+        searchText: searchText,
+        additionalText: library.name(for: node, scopeKey: libraryScopeKey)
+      ) else {
         return false
       }
 
@@ -268,7 +272,9 @@ struct MenuBarRootView: View {
     filteredNodes
       .filter { library.isFavorite(nodeID: $0.id, scopeKey: libraryScopeKey) }
       .sorted { lhs, rhs in
-        lhs.hostname.localizedCaseInsensitiveCompare(rhs.hostname) == .orderedAscending
+        library.name(for: lhs, scopeKey: libraryScopeKey).localizedCaseInsensitiveCompare(
+          library.name(for: rhs, scopeKey: libraryScopeKey)
+        ) == .orderedAscending
       }
   }
 

@@ -58,6 +58,44 @@ struct NodeLibraryStoreTests {
     #expect(store.recentNodeIDs(scopeKey: "proxy-b") == ["node-b"])
   }
 
+  @Test func customNodeNamePersistsAndIsScoped() {
+    let (suiteName, defaults) = makeDefaults()
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    let node = TeleportNode(
+      id: "node-1",
+      hostname: "original-hostname",
+      address: "10.0.0.1:3022",
+      labels: [],
+      labelMap: [:]
+    )
+    let store = NodeLibraryStore(defaults: defaults)
+    store.rename(nodeID: node.id, to: "Production API", scopeKey: "proxy-a")
+
+    let reloadedStore = NodeLibraryStore(defaults: defaults)
+
+    #expect(reloadedStore.name(for: node, scopeKey: "proxy-a") == "Production API")
+    #expect(reloadedStore.name(for: node, scopeKey: "proxy-b") == "original-hostname")
+  }
+
+  @Test func blankCustomNodeNameRestoresHostname() {
+    let (suiteName, defaults) = makeDefaults()
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    let node = TeleportNode(
+      id: "node-1",
+      hostname: "original-hostname",
+      address: "10.0.0.1:3022",
+      labels: [],
+      labelMap: [:]
+    )
+    let store = NodeLibraryStore(defaults: defaults)
+    store.rename(nodeID: node.id, to: "Production API", scopeKey: "proxy-a")
+    store.rename(nodeID: node.id, to: "  ", scopeKey: "proxy-a")
+
+    #expect(store.name(for: node, scopeKey: "proxy-a") == "original-hostname")
+  }
+
   private func makeDefaults() -> (String, UserDefaults) {
     let suiteName = "NodeLibraryStoreTests.\(UUID().uuidString)"
     return (suiteName, UserDefaults(suiteName: suiteName)!)

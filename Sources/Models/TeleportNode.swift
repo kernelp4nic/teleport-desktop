@@ -45,7 +45,7 @@ struct TeleportNode: Identifiable, Equatable, Codable, Sendable {
     return filteredLogins.first
   }
 
-  func matches(searchText: String) -> Bool {
+  func matches(searchText: String, additionalText: String? = nil) -> Bool {
     let trimmedSearch = searchText
       .trimmingCharacters(in: .whitespacesAndNewlines)
       .lowercased()
@@ -54,7 +54,8 @@ struct TeleportNode: Identifiable, Equatable, Codable, Sendable {
       return true
     }
 
-    let haystack = ([hostname, address] + labels.map { "\($0.key) \($0.value)" })
+    let haystack = ([hostname, address, additionalText].compactMap { $0 }
+      + labels.map { "\($0.key) \($0.value)" })
       .joined(separator: " ")
       .lowercased()
 

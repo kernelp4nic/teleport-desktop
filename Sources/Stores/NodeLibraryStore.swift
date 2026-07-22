@@ -6,6 +6,7 @@ final class NodeLibraryStore {
   private enum Keys {
     static let favoritesByScope = "favoritesByScope"
     static let recentsByScope = "recentsByScope"
+    static let nodeNamesByScope = "nodeNamesByScope"
   }
 
   @ObservationIgnored private let defaults: UserDefaults
@@ -24,6 +25,12 @@ final class NodeLibraryStore {
     }
   }
 
+  var nodeNamesByScope: [String: [String: String]] {
+    didSet {
+      persistNodeNames()
+    }
+  }
+
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
     favoritesByScope = Self.loadValue(
@@ -34,6 +41,12 @@ final class NodeLibraryStore {
     )
     recentsByScope = Self.loadValue(
       forKey: Keys.recentsByScope,
+      defaults: defaults,
+      decoder: decoder,
+      fallback: [:]
+    )
+    nodeNamesByScope = Self.loadValue(
+      forKey: Keys.nodeNamesByScope,
       defaults: defaults,
       decoder: decoder,
       fallback: [:]
@@ -97,6 +110,24 @@ final class NodeLibraryStore {
     }
   }
 
+  func name(for node: TeleportNode, scopeKey: String) -> String {
+    nodeNamesByScope[scopeKey]?[node.id] ?? node.hostname
+  }
+
+  func rename(nodeID: String, to name: String, scopeKey: String) {
+    let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if trimmedName.isEmpty {
+      nodeNamesByScope[scopeKey]?.removeValue(forKey: nodeID)
+
+      if nodeNamesByScope[scopeKey]?.isEmpty == true {
+        nodeNamesByScope.removeValue(forKey: scopeKey)
+      }
+    } else {
+      nodeNamesByScope[scopeKey, default: [:]][nodeID] = trimmedName
+    }
+  }
+
   private static func loadValue<T: Decodable>(
     forKey key: String,
     defaults: UserDefaults,
@@ -117,6 +148,10 @@ final class NodeLibraryStore {
 
   private func persistRecents() {
     persist(recentsByScope, forKey: Keys.recentsByScope)
+  }
+
+  private func persistNodeNames() {
+    persist(nodeNamesByScope, forKey: Keys.nodeNamesByScope)
   }
 
   private func persist<T: Encodable>(_ value: T, forKey key: String) {

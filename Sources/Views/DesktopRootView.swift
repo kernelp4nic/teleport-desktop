@@ -4,12 +4,15 @@ import SwiftUI
 
 struct DesktopRootView: View {
   @Environment(\.openSettings) private var openSettings
+  @FocusState private var isRenameFieldFocused: Bool
   @Bindable var store: TeleportNodeStore
   @Bindable var settings: SettingsStore
   @Bindable var library: NodeLibraryStore
   @SceneStorage("desktop.searchText") private var searchText = ""
   @SceneStorage("desktop.selectedGroup") private var selectedGroup = Self.allGroups
   @State private var browserSelectedNodeID: String?
+  @State private var browserSelectedRowID: String?
+  @State private var collapsedSectionIDs = Set<String>()
   @State private var fileTransferDirection: FileTransferDirection?
   @State private var fileTransferMessage: String?
   @State private var fileTransferOperation: TeleportFileTransferOperation?
@@ -17,6 +20,8 @@ struct DesktopRootView: View {
   @State private var fileTransferToastMessage: String?
   @State private var isTransferringFile = false
   @State private var remoteFilePath = "~/"
+  @State private var renamedNodeID: String?
+  @State private var renamedNodeName = ""
   @State private var uploadURLs: [URL] = []
   @State private var terminalFocusToken = 0
   @State private var tabStore = DesktopTabStore()
@@ -133,6 +138,21 @@ struct DesktopRootView: View {
         onUpload: uploadFiles
       )
     }
+    .alert("Rename Server", isPresented: renameAlertIsPresented) {
+      TextField("Server name", text: $renamedNodeName)
+        .focused($isRenameFieldFocused)
+
+      Button("Cancel", role: .cancel) {
+        isRenameFieldFocused = false
+        renamedNodeID = nil
+      }
+
+      Button("Rename") {
+        applyNodeRename()
+      }
+    } message: {
+      Text("Leave the name empty to restore the original hostname.")
+    }
   }
 
   @ViewBuilder
@@ -228,10 +248,11 @@ struct DesktopRootView: View {
         } else {
           List(selection: selectedNodeBinding) {
             ForEach(sections) { section in
-              Section {
+              Section(isExpanded: sectionIsExpandedBinding(for: section.id)) {
                 ForEach(section.nodes) { node in
                   DesktopServerRowView(
                     node: node,
+                    name: library.name(for: node, scopeKey: libraryScopeKey),
                     groupingKey: settings.normalizedGroupingLabelKey,
                     resolvedLogin: resolvedLogin(for: node),
                     isFavorite: library.isFavorite(nodeID: node.id, scopeKey: libraryScopeKey),
@@ -239,7 +260,7 @@ struct DesktopRootView: View {
                       toggleFavorite(for: node)
                     }
                   )
-                  .tag(node.id)
+                  .tag(rowID(sectionID: section.id, nodeID: node.id))
                   .contentShape(Rectangle())
                   .listRowInsets(
                     EdgeInsets(top: 4, leading: 26, bottom: 4, trailing: 10)
@@ -248,14 +269,26 @@ struct DesktopRootView: View {
               } header: {
                 Text(section.title)
                   .textCase(nil)
-                  .font(.caption.weight(.medium))
+                  .font(.subheadline.weight(.semibold))
                   .foregroundStyle(.secondary)
+                  .frame(maxWidth: .infinity, alignment: .leading)
+                  .contentShape(Rectangle())
+                  .onTapGesture {
+                    toggleSection(section.id)
+                  }
                   .padding(.leading, 6)
               }
             }
           }
           .listStyle(.sidebar)
           .contextMenu(forSelectionType: String.self) { selectedIDs in
+            Button("Rename") {
+              prepareNodeRename(selectedIDs)
+            }
+            .disabled(node(forSelection: selectedIDs) == nil)
+
+            Divider()
+
             Button("Connect in App") {
               connectSelectionToNewTab(selectedIDs)
             }
@@ -421,10 +454,11 @@ struct DesktopRootView: View {
   private var selectedNodeBinding: Binding<String?> {
     Binding(
       get: {
-        browserSelectedNodeID
+        browserSelectedRowID
       },
       set: { newValue in
-        browserSelectedNodeID = newValue
+        browserSelectedRowID = newValue
+        browserSelectedNodeID = newValue.flatMap(nodeID(fromRowID:))
       }
     )
   }
@@ -465,7 +499,10 @@ struct DesktopRootView: View {
 
   private var filteredNodes: [TeleportNode] {
     store.nodes.filter { node in
-      guard node.matches(searchText: searchText) else {
+      guard node.matches(
+        searchText: searchText,
+        additionalText: library.name(for: node, scopeKey: libraryScopeKey)
+      ) else {
         return false
       }
 
@@ -496,7 +533,9 @@ struct DesktopRootView: View {
     filteredNodes
       .filter { library.isFavorite(nodeID: $0.id, scopeKey: libraryScopeKey) }
       .sorted { lhs, rhs in
-        lhs.hostname.localizedCaseInsensitiveCompare(rhs.hostname) == .orderedAscending
+        library.name(for: lhs, scopeKey: libraryScopeKey).localizedCaseInsensitiveCompare(
+          library.name(for: rhs, scopeKey: libraryScopeKey)
+        ) == .orderedAscending
       }
   }
 
@@ -552,6 +591,31 @@ struct DesktopRootView: View {
     )
 
     return visibleSections
+  }
+
+  private func sectionIsExpandedBinding(for sectionID: String) -> Binding<Bool> {
+    Binding(
+      get: { !collapsedSectionIDs.contains(sectionID) },
+      set: { isExpanded in
+        withAnimation(.easeInOut(duration: 0.2)) {
+          if isExpanded {
+            collapsedSectionIDs.remove(sectionID)
+          } else {
+            collapsedSectionIDs.insert(sectionID)
+          }
+        }
+      }
+    )
+  }
+
+  private func toggleSection(_ sectionID: String) {
+    withAnimation(.easeInOut(duration: 0.2)) {
+      if collapsedSectionIDs.contains(sectionID) {
+        collapsedSectionIDs.remove(sectionID)
+      } else {
+        collapsedSectionIDs.insert(sectionID)
+      }
+    }
   }
 
   private var activeTab: DesktopTab? {
@@ -619,7 +683,7 @@ struct DesktopRootView: View {
 
   private var detailTitle: String {
     if let detailNode {
-      return detailNode.hostname
+      return library.name(for: detailNode, scopeKey: libraryScopeKey)
     }
 
     return activeTab?.terminalStore.currentTitle ?? "Select a Server"
@@ -668,7 +732,7 @@ struct DesktopRootView: View {
     let tab = tabStore.openTab(
       windowState: DesktopWindowState.command(
         command,
-        title: "\(login)@\(node.hostname)",
+        title: "\(login)@\(library.name(for: node, scopeKey: libraryScopeKey))",
         summary: "Running tsh ssh as \(login)",
         selectedNodeID: node.id,
         connectedNodeID: node.id
@@ -718,7 +782,8 @@ struct DesktopRootView: View {
   }
 
   private func node(forSelection selectedIDs: Set<String>) -> TeleportNode? {
-    guard let nodeID = selectedIDs.first else {
+    guard let rowID = selectedIDs.first,
+          let nodeID = nodeID(fromRowID: rowID) else {
       return nil
     }
 
@@ -731,6 +796,55 @@ struct DesktopRootView: View {
 
   private func toggleFavorite(for node: TeleportNode) {
     library.toggleFavorite(nodeID: node.id, scopeKey: libraryScopeKey)
+  }
+
+  private func rowID(sectionID: String, nodeID: String) -> String {
+    "\(sectionID)\u{1F}\(nodeID)"
+  }
+
+  private func nodeID(fromRowID rowID: String) -> String? {
+    rowID.split(separator: "\u{1F}", maxSplits: 1).last.map(String.init)
+  }
+
+  private func preferredRowID(for nodeID: String) -> String? {
+    guard let section = sections.last(where: { section in
+      section.nodes.contains { $0.id == nodeID }
+    }) else {
+      return nil
+    }
+
+    return rowID(sectionID: section.id, nodeID: nodeID)
+  }
+
+  private var renameAlertIsPresented: Binding<Bool> {
+    Binding(
+      get: { renamedNodeID != nil },
+      set: { isPresented in
+        if !isPresented {
+          renamedNodeID = nil
+        }
+      }
+    )
+  }
+
+  private func prepareNodeRename(_ selectedIDs: Set<String>) {
+    guard let node = node(forSelection: selectedIDs) else {
+      return
+    }
+
+    renamedNodeID = node.id
+    renamedNodeName = library.name(for: node, scopeKey: libraryScopeKey)
+    isRenameFieldFocused = true
+  }
+
+  private func applyNodeRename() {
+    guard let renamedNodeID else {
+      return
+    }
+
+    library.rename(nodeID: renamedNodeID, to: renamedNodeName, scopeKey: libraryScopeKey)
+    isRenameFieldFocused = false
+    self.renamedNodeID = nil
   }
 
   private func reconcileSelection() {
@@ -751,15 +865,20 @@ struct DesktopRootView: View {
 
     if let browserSelectedNodeID,
        store.nodes.contains(where: { $0.id == browserSelectedNodeID }) {
+      if browserSelectedRowID.flatMap(nodeID(fromRowID:)) != browserSelectedNodeID {
+        browserSelectedRowID = preferredRowID(for: browserSelectedNodeID)
+      }
       return
     }
 
     guard !filteredNodes.isEmpty else {
       browserSelectedNodeID = nil
+      browserSelectedRowID = nil
       return
     }
 
     browserSelectedNodeID = filteredNodes[0].id
+    browserSelectedRowID = preferredRowID(for: filteredNodes[0].id)
   }
 
   private func syncSidebarSelectionToActiveTab() {
@@ -768,10 +887,12 @@ struct DesktopRootView: View {
     }
 
     browserSelectedNodeID = selectedNodeID
+    browserSelectedRowID = preferredRowID(for: selectedNodeID)
   }
 
   private func closeTab(_ tab: DesktopTab) {
     browserSelectedNodeID = tab.selectedNodeID
+    browserSelectedRowID = tab.selectedNodeID.flatMap(preferredRowID(for:))
     _ = tabStore.closeTab(id: tab.id)
   }
 
