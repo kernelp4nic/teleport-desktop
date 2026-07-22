@@ -12,6 +12,8 @@ struct DesktopRootView: View {
   @State private var browserSelectedNodeID: String?
   @State private var fileTransferDirection: FileTransferDirection?
   @State private var fileTransferMessage: String?
+  @State private var fileTransferOperation: TeleportFileTransferOperation?
+  @State private var fileTransferProgress: Double?
   @State private var fileTransferToastMessage: String?
   @State private var isTransferringFile = false
   @State private var remoteFilePath = "~/"
@@ -124,6 +126,8 @@ struct DesktopRootView: View {
         uploadURLs: uploadURLs,
         isTransferring: isTransferringFile,
         message: fileTransferMessage,
+        progress: fileTransferProgress,
+        onCancel: cancelFileTransfer,
         onChooseFiles: chooseUploadFiles,
         onChooseDownloadDirectory: downloadFile,
         onUpload: uploadFiles
@@ -835,12 +839,14 @@ struct DesktopRootView: View {
     remoteFilePath = "~/"
     uploadURLs = []
     fileTransferMessage = nil
+    fileTransferProgress = nil
     fileTransferDirection = .upload
   }
 
   private func prepareDownload() {
     remoteFilePath = "~/"
     fileTransferMessage = nil
+    fileTransferProgress = nil
     fileTransferDirection = .download
   }
 
@@ -866,16 +872,23 @@ struct DesktopRootView: View {
     let urls = uploadURLs
     let remotePath = remoteFilePath
     isTransferringFile = true
+    fileTransferProgress = 0
     fileTransferMessage = "Uploading \(urls.count) file\(urls.count == 1 ? "" : "s")…"
 
     Task {
       do {
-        try await TeleportFileTransferService().upload(
+        let operation = try TeleportFileTransferService().uploadOperation(
           localURLs: urls,
           remotePath: remotePath,
           login: transferTarget.login,
           hostname: transferTarget.hostname
         )
+        fileTransferOperation = operation
+        try await operation.run { progress in
+          Task { @MainActor in
+            fileTransferProgress = progress
+          }
+        }
         fileTransferDirection = nil
         showFileTransferToast("Upload complete")
       } catch {
@@ -883,6 +896,7 @@ struct DesktopRootView: View {
       }
 
       isTransferringFile = false
+      fileTransferOperation = nil
     }
   }
 
@@ -904,16 +918,23 @@ struct DesktopRootView: View {
 
     let remotePath = remoteFilePath
     isTransferringFile = true
+    fileTransferProgress = 0
     fileTransferMessage = "Downloading file…"
 
     Task {
       do {
-        try await TeleportFileTransferService().download(
+        let operation = try TeleportFileTransferService().downloadOperation(
           remotePath: remotePath,
           localDirectoryURL: localDirectoryURL,
           login: transferTarget.login,
           hostname: transferTarget.hostname
         )
+        fileTransferOperation = operation
+        try await operation.run { progress in
+          Task { @MainActor in
+            fileTransferProgress = progress
+          }
+        }
         fileTransferDirection = nil
         showFileTransferToast("Download complete")
       } catch {
@@ -921,7 +942,13 @@ struct DesktopRootView: View {
       }
 
       isTransferringFile = false
+      fileTransferOperation = nil
     }
+  }
+
+  private func cancelFileTransfer() {
+    fileTransferMessage = "Cancelling transfer…"
+    fileTransferOperation?.cancel()
   }
 
   private var transferTarget: (login: String, hostname: String)? {
@@ -962,6 +989,8 @@ private struct FileTransferView: View {
   let uploadURLs: [URL]
   let isTransferring: Bool
   let message: String?
+  let progress: Double?
+  let onCancel: () -> Void
   let onChooseFiles: () -> Void
   let onChooseDownloadDirectory: () -> Void
   let onUpload: () -> Void
@@ -976,6 +1005,7 @@ private struct FileTransferView: View {
         text: $remotePath
       )
       .textFieldStyle(.roundedBorder)
+      .disabled(isTransferring)
 
       if direction == .upload {
         Button(action: onChooseFiles) {
@@ -991,6 +1021,7 @@ private struct FileTransferView: View {
         .buttonStyle(.plain)
         .background(.quaternary.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .disabled(isTransferring)
 
         Button("Upload", action: onUpload)
           .buttonStyle(.borderedProminent)
@@ -1002,15 +1033,26 @@ private struct FileTransferView: View {
       }
 
       if isTransferring {
-        HStack(spacing: 10) {
-          ProgressView()
+        VStack(spacing: 10) {
+          if let progress {
+            ProgressView(value: progress)
+
+            Text("\(Int(progress * 100))%")
+              .font(.caption.monospacedDigit())
+              .foregroundStyle(.secondary)
+          } else {
+            ProgressView()
+          }
 
           if let message {
             Text(message)
               .font(.caption)
               .foregroundStyle(.secondary)
           }
+
+          Button("Cancel", role: .destructive, action: onCancel)
         }
+        .frame(maxWidth: .infinity)
       }
 
       if let message, !isTransferring {
@@ -1022,6 +1064,7 @@ private struct FileTransferView: View {
     }
     .padding(20)
     .frame(width: 420)
+    .interactiveDismissDisabled(isTransferring)
   }
 
   private var uploadButtonTitle: String {

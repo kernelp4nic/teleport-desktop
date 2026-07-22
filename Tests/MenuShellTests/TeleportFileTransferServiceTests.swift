@@ -62,6 +62,16 @@ struct TeleportFileTransferServiceTests {
       )
     }
   }
+
+  @Test func parsesLatestTshProgressPercentage() {
+    let output = "report.csv  12% |█         | (1.2/10 MB)\\rreport.csv  48% |████      |"
+
+    #expect(TeleportFileTransferProgressParser.lastProgress(in: output) == 0.48)
+  }
+
+  @Test func ignoresOutputWithoutProgressPercentage() {
+    #expect(TeleportFileTransferProgressParser.lastProgress(in: "Connecting...") == nil)
+  }
 }
 
 private final class RecordingCommandRunner: CommandRunning, @unchecked Sendable {
