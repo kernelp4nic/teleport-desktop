@@ -40,9 +40,13 @@ enum ShellBootstrap {
   static func commandBody(
     for command: String,
     shellPath: String? = nil,
+    openInteractiveShellAfterCommand: Bool = true,
     processInfo: ProcessInfo = .processInfo
   ) -> String {
     let shellPath = shellPath ?? self.shellPath(processInfo: processInfo)
+    let finalCommand = openInteractiveShellAfterCommand
+      ? "exec \"${SHELL:-\(shellPath)}\" -l"
+      : "exit \"$command_status\""
 
     return """
     export PATH="\(pathValue(from: processInfo))"
@@ -55,7 +59,7 @@ enum ShellBootstrap {
       echo "Command exited with status $command_status"
     fi
 
-    exec "${SHELL:-\(shellPath)}" -l
+    \(finalCommand)
     """
   }
 

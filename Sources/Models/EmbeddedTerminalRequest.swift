@@ -56,7 +56,13 @@ struct EmbeddedTerminalRequest: Codable, Equatable, Hashable, Identifiable {
   ) -> EmbeddedTerminalRequest {
     EmbeddedTerminalRequest(
       executable: shellPath,
-      args: ["-lc", ShellBootstrap.commandBody(for: command)],
+      args: [
+        "-lc",
+        ShellBootstrap.commandBody(
+          for: command,
+          openInteractiveShellAfterCommand: false
+        )
+      ],
       environment: environment,
       execName: ShellBootstrap.execName(for: shellPath),
       currentDirectory: currentDirectory,

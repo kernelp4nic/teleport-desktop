@@ -29,6 +29,7 @@ struct EmbeddedTerminalRequestTests {
     #expect(request.args[1].contains("tsh ssh ubuntu@example"))
     #expect(request.args[1].contains("command_status=$?"))
     #expect(!request.args[1].contains("\nstatus=$?\n"))
-    #expect(request.args[1].contains("exec \"${SHELL:-"))
+    #expect(request.args[1].contains("exit \"$command_status\""))
+    #expect(!request.args[1].contains("exec \"${SHELL:-"))
   }
 }
