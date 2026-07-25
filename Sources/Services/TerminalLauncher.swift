@@ -74,7 +74,7 @@ struct TerminalLauncher {
     temporaryDirectory: URL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
   ) throws -> URL {
     let scriptsDirectory = temporaryDirectory
-      .appendingPathComponent("menu-shell", isDirectory: true)
+      .appendingPathComponent("teleport-desktop", isDirectory: true)
       .appendingPathComponent("commands", isDirectory: true)
 
     try fileManager.createDirectory(

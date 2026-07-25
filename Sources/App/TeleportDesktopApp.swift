@@ -10,7 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct MenuShellApp: App {
+struct TeleportDesktopApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @State private var settingsStore = SettingsStore()
   @State private var nodeStore = TeleportNodeStore()

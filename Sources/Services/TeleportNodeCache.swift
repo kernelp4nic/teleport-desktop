@@ -19,7 +19,7 @@ struct TeleportNodeCache {
       ).first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
 
       self.cacheDirectory = applicationSupportDirectory
-        .appendingPathComponent("MenuShell", isDirectory: true)
+        .appendingPathComponent("teleport-desktop", isDirectory: true)
         .appendingPathComponent("Cache", isDirectory: true)
     }
   }

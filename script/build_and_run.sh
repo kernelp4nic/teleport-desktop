@@ -3,8 +3,8 @@ set -euo pipefail
 
 MODE="${1:-run}"
 APP_DISPLAY_NAME="Teleport Desktop"
-APP_EXECUTABLE_NAME="MenuShell"
-BUNDLE_ID="com.kernelp4nic.MenuShell"
+APP_EXECUTABLE_NAME="teleport-desktop"
+BUNDLE_ID="com.kernelp4nic.teleport-desktop"
 APP_ICON_NAME="TeleportDesktop.icns"
 MIN_SYSTEM_VERSION="14.0"
 

@@ -1,5 +1,5 @@
 import Testing
-@testable import MenuShell
+@testable import teleport_desktop
 
 struct TeleportNodeStoreTests {
   @MainActor

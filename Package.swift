@@ -3,14 +3,14 @@
 import PackageDescription
 
 let package = Package(
-  name: "MenuShell",
+  name: "teleport-desktop",
   platforms: [
     .macOS(.v14)
   ],
   products: [
     .executable(
-      name: "MenuShell",
-      targets: ["MenuShell"]
+      name: "teleport-desktop",
+      targets: ["teleport-desktop"]
     )
   ],
   dependencies: [
@@ -18,16 +18,16 @@ let package = Package(
   ],
   targets: [
     .executableTarget(
-      name: "MenuShell",
+      name: "teleport-desktop",
       dependencies: [
         .product(name: "SwiftTerm", package: "SwiftTerm")
       ],
       path: "Sources"
     ),
     .testTarget(
-      name: "MenuShellTests",
-      dependencies: ["MenuShell"],
-      path: "Tests/MenuShellTests"
+      name: "teleport-desktop-tests",
+      dependencies: ["teleport-desktop"],
+      path: "Tests/teleport-desktop-tests"
     )
   ]
 )

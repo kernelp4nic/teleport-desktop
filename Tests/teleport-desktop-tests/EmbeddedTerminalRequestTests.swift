@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import MenuShell
+@testable import teleport_desktop
 
 struct EmbeddedTerminalRequestTests {
   @Test func shellRequestStartsInteractiveLoginShell() {
