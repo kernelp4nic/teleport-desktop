@@ -9,6 +9,7 @@ final class TeleportNodeStore {
   @ObservationIgnored private let refreshWorker: TeleportRefreshWorker
   @ObservationIgnored private let terminalLauncher: TerminalLauncher
   @ObservationIgnored private let autoRefreshCooldown: TimeInterval
+  @ObservationIgnored private let isDemoMode: Bool
   @ObservationIgnored private var isRefreshing = false
 
   var nodes: [TeleportNode] = []
@@ -22,21 +23,31 @@ final class TeleportNodeStore {
     teleportService: TeleportService = TeleportService(),
     nodeCache: TeleportNodeCache = TeleportNodeCache(),
     terminalLauncher: TerminalLauncher = TerminalLauncher(),
-    autoRefreshCooldown: TimeInterval = 120
+    autoRefreshCooldown: TimeInterval = 120,
+    environment: [String: String] = ProcessInfo.processInfo.environment
   ) {
     self.teleportService = teleportService
     self.nodeCache = nodeCache
     refreshWorker = TeleportRefreshWorker()
     self.terminalLauncher = terminalLauncher
     self.autoRefreshCooldown = autoRefreshCooldown
+    isDemoMode = environment["TELEPORT_DESKTOP_DEMO"] == "1"
 
-    if let cachedNodes = nodeCache.loadMostRecentNodes() {
+    if isDemoMode {
+      nodes = DemoContent.nodes
+      session = DemoContent.session
+      lastRefreshedAt = Date()
+    } else if let cachedNodes = nodeCache.loadMostRecentNodes() {
       nodes = cachedNodes.nodes
       lastRefreshedAt = cachedNodes.fetchedAt
     }
   }
 
   func refreshIfNeeded(using settings: SettingsStore) async {
+    guard !isDemoMode else {
+      return
+    }
+
     guard shouldAutoRefresh else {
       return
     }
@@ -45,6 +56,10 @@ final class TeleportNodeStore {
   }
 
   func refresh(using settings: SettingsStore, forceRefresh: Bool = false) async {
+    guard !isDemoMode else {
+      return
+    }
+
     guard !isRefreshing else {
       return
     }
