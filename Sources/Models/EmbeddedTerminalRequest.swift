@@ -1,5 +1,9 @@
 import Foundation
 
+enum EmbeddedTerminalMode: String, Codable {
+  case tmuxControl
+}
+
 struct EmbeddedTerminalRequest: Codable, Equatable, Hashable, Identifiable {
   let id: UUID
   let executable: String
@@ -9,6 +13,7 @@ struct EmbeddedTerminalRequest: Codable, Equatable, Hashable, Identifiable {
   let currentDirectory: String?
   let title: String
   let summary: String
+  let mode: EmbeddedTerminalMode?
 
   init(
     id: UUID = UUID(),
@@ -18,7 +23,8 @@ struct EmbeddedTerminalRequest: Codable, Equatable, Hashable, Identifiable {
     execName: String?,
     currentDirectory: String? = nil,
     title: String,
-    summary: String
+    summary: String,
+    mode: EmbeddedTerminalMode? = nil
   ) {
     self.id = id
     self.executable = executable
@@ -28,6 +34,7 @@ struct EmbeddedTerminalRequest: Codable, Equatable, Hashable, Identifiable {
     self.currentDirectory = currentDirectory
     self.title = title
     self.summary = summary
+    self.mode = mode
   }
 
   static func shell(
@@ -68,6 +75,30 @@ struct EmbeddedTerminalRequest: Codable, Equatable, Hashable, Identifiable {
       currentDirectory: currentDirectory,
       title: title,
       summary: summary
+    )
+  }
+
+  static func tmuxControl(
+    _ command: String,
+    title: String,
+    summary: String,
+    shellPath: String = "/bin/zsh",
+    environment: [String] = ShellBootstrap.environment()
+  ) -> EmbeddedTerminalRequest {
+    EmbeddedTerminalRequest(
+      executable: shellPath,
+      args: [
+        "-lc",
+        ShellBootstrap.commandBody(
+          for: command,
+          openInteractiveShellAfterCommand: false
+        )
+      ],
+      environment: environment,
+      execName: ShellBootstrap.execName(for: shellPath),
+      title: title,
+      summary: summary,
+      mode: .tmuxControl
     )
   }
 }

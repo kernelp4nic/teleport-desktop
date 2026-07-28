@@ -9,6 +9,7 @@ final class SettingsStore {
     static let loginLabelKey = "loginLabelKey"
     static let fallbackLogin = "fallbackLogin"
     static let terminalApplicationID = "terminalApplicationID"
+    static let useTmuxByDefault = "useTmuxByDefault"
   }
 
   @ObservationIgnored private let defaults: UserDefaults
@@ -43,6 +44,12 @@ final class SettingsStore {
     }
   }
 
+  var useTmuxByDefault: Bool {
+    didSet {
+      defaults.set(useTmuxByDefault, forKey: Keys.useTmuxByDefault)
+    }
+  }
+
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
     proxyAddress = defaults.string(forKey: Keys.proxyAddress) ?? ""
@@ -51,6 +58,7 @@ final class SettingsStore {
     fallbackLogin = defaults.string(forKey: Keys.fallbackLogin) ?? ""
     terminalApplicationID = defaults.string(forKey: Keys.terminalApplicationID)
       ?? TerminalApplication.systemDefault.rawValue
+    useTmuxByDefault = defaults.bool(forKey: Keys.useTmuxByDefault)
   }
 
   var normalizedProxyAddress: String? {

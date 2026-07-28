@@ -96,4 +96,36 @@ struct TeleportServiceTests {
 
     #expect(command == "tsh ssh ubuntu@acme.web01")
   }
+
+  @Test func tmuxControlCommandAttachesToPersistentRemoteSession() {
+    let defaults = UserDefaults(suiteName: UUID().uuidString)!
+    let settings = SettingsStore(defaults: defaults)
+    settings.fallbackLogin = "ubuntu"
+    let node = TeleportNode(
+      id: "node-1",
+      hostname: "acme.web01",
+      address: "Tunnel",
+      labels: [],
+      labelMap: [:]
+    )
+    let session = TeleportSession(
+      state: .active,
+      proxy: nil,
+      cluster: "teleport.example.com",
+      username: "sebastianm",
+      logins: ["ubuntu"],
+      validUntil: nil
+    )
+
+    let command = TeleportService().tmuxControlCommand(
+      for: node,
+      settings: settings,
+      session: session
+    )
+
+    #expect(
+      command ==
+        "tsh ssh -t ubuntu@acme.web01 tmux -CC new-session -A -s teleport-desktop -x 120 -y 40"
+    )
+  }
 }

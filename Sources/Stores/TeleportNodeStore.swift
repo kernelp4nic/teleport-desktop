@@ -135,6 +135,14 @@ final class TeleportNodeStore {
     )
   }
 
+  func tmuxControlCommand(for node: TeleportNode, settings: SettingsStore) -> String? {
+    teleportService.tmuxControlCommand(
+      for: node,
+      settings: settings,
+      session: session
+    )
+  }
+
   func loginCommand(using settings: SettingsStore) -> String {
     teleportService.loginCommand(proxy: session.proxy ?? settings.normalizedProxyAddress)
   }

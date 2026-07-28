@@ -4,10 +4,12 @@ import SwiftUI
 
 struct MenuBarRootView: View {
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.openWindow) private var openWindow
   @Environment(\.openSettings) private var openSettings
   @Bindable var store: TeleportNodeStore
   @Bindable var settings: SettingsStore
   @Bindable var library: NodeLibraryStore
+  @Bindable var navigation: AppNavigationStore
   @State private var searchText = ""
   @State private var selectedGroup = Self.allGroups
 
@@ -59,12 +61,13 @@ struct MenuBarRootView: View {
         } label: {
           Image(systemName: "arrow.clockwise")
         }
+        .buttonStyle(ActionButtonStyle())
         .help("Refresh servers")
 
         Button("Login") {
           store.login(using: settings)
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(ActionButtonStyle(prominent: true))
         .controlSize(.small)
       }
 
@@ -156,11 +159,10 @@ struct MenuBarRootView: View {
                     toggleFavorite(for: node)
                   },
                   onConnect: {
-                    Task {
-                      dismiss()
-                      try? await Task.sleep(for: .milliseconds(120))
-                      store.connect(to: node, settings: settings)
-                    }
+                    navigation.requestConnection(to: node.id)
+                    dismiss()
+                    openWindow(id: "main")
+                    NSApp.activate(ignoringOtherApps: true)
                   }
                 )
               }

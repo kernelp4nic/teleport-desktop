@@ -43,4 +43,18 @@ struct DesktopWindowState: Codable, Hashable, Identifiable {
       connectedNodeID: connectedNodeID
     )
   }
+
+  static func tmuxControl(
+    _ command: String,
+    title: String,
+    summary: String,
+    selectedNodeID: String,
+    connectedNodeID: String
+  ) -> DesktopWindowState {
+    DesktopWindowState(
+      request: .tmuxControl(command, title: title, summary: summary),
+      selectedNodeID: selectedNodeID,
+      connectedNodeID: connectedNodeID
+    )
+  }
 }

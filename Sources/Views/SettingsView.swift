@@ -24,12 +24,21 @@ struct SettingsView: View {
         .pickerStyle(.menu)
       }
 
+      Section("Connections") {
+        Toggle("Use tmux by default", isOn: $settings.useTmuxByDefault)
+
+        Text("Connect actions will open the persistent remote tmux workspace. You can still choose a regular SSH connection from the server view.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
       Section("Server Cache") {
         Button("Refresh server cache") {
           Task {
             await store.refresh(using: settings, forceRefresh: true)
           }
         }
+        .buttonStyle(ActionButtonStyle())
         .disabled(store.isLoading)
 
         if let lastRefreshedAt = store.lastRefreshedAt {

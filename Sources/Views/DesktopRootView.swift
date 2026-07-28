@@ -8,6 +8,7 @@ struct DesktopRootView: View {
   @Bindable var store: TeleportNodeStore
   @Bindable var settings: SettingsStore
   @Bindable var library: NodeLibraryStore
+  @Bindable var navigation: AppNavigationStore
   @SceneStorage("desktop.searchText") private var searchText = ""
   @SceneStorage("desktop.selectedGroup") private var selectedGroup = Self.allGroups
   @State private var browserSelectedNodeID: String?
@@ -68,6 +69,7 @@ struct DesktopRootView: View {
         } label: {
           Label("Refresh", systemImage: "arrow.clockwise")
         }
+        .buttonStyle(ActionButtonStyle())
         .disabled(store.isLoading)
 
         Button {
@@ -75,12 +77,14 @@ struct DesktopRootView: View {
         } label: {
           Label("Login", systemImage: "person.badge.key")
         }
+        .buttonStyle(ActionButtonStyle())
 
         Button {
           showTerminalSearch()
         } label: {
           Label("Find", systemImage: "magnifyingglass")
         }
+        .buttonStyle(ActionButtonStyle())
         .disabled(activeTab == nil)
 
         Button {
@@ -89,6 +93,7 @@ struct DesktopRootView: View {
         } label: {
           Label("Settings", systemImage: "gearshape")
         }
+        .buttonStyle(ActionButtonStyle())
       }
 
       ToolbarItem(placement: .automatic) {
@@ -100,11 +105,13 @@ struct DesktopRootView: View {
     }
     .task {
       guard !store.isLoading else {
+        handlePendingNodeConnection()
         return
       }
 
       await store.refreshIfNeeded(using: settings)
       reconcileSelection()
+      handlePendingNodeConnection()
     }
     .onChange(of: settings.groupingLabelKey) {
       selectedGroup = Self.allGroups
@@ -112,6 +119,10 @@ struct DesktopRootView: View {
     }
     .onChange(of: store.nodes) {
       reconcileSelection()
+      handlePendingNodeConnection()
+    }
+    .onChange(of: navigation.nodeConnectionRequest?.id) {
+      handlePendingNodeConnection()
     }
     .onChange(of: searchText) {
       reconcileSelection()
@@ -348,6 +359,7 @@ struct DesktopRootView: View {
                 } label: {
                   Label("Upload Files", systemImage: "arrow.up.to.line")
                 }
+                .buttonStyle(ActionButtonStyle())
                 .help("Upload files")
 
                 Button {
@@ -355,6 +367,7 @@ struct DesktopRootView: View {
                 } label: {
                   Label("Download File", systemImage: "arrow.down.to.line")
                 }
+                .buttonStyle(ActionButtonStyle())
                 .help("Download file")
               }
 
@@ -364,17 +377,27 @@ struct DesktopRootView: View {
             HStack(spacing: 10) {
               Button("Connect") {
                 if let actionNode {
-                  openNodeInApp(node: actionNode)
+                  openNodeUsingPreferredMode(node: actionNode)
                 }
               }
-              .buttonStyle(.borderedProminent)
+              .buttonStyle(ActionButtonStyle(prominent: true))
               .disabled(actionNode == nil || actionLogin == nil)
+
+              Button(alternativeConnectionTitle) {
+                if let actionNode {
+                  openNodeUsingAlternativeMode(node: actionNode)
+                }
+              }
+              .buttonStyle(ActionButtonStyle())
+              .disabled(actionNode == nil || actionLogin == nil)
+              .help(alternativeConnectionHelp)
 
               Button(openExternallyTitle) {
                 if let actionNode {
                   openNodeExternally(actionNode)
                 }
               }
+              .buttonStyle(ActionButtonStyle())
               .disabled(actionNode == nil || actionLogin == nil)
             }
           }
@@ -417,10 +440,19 @@ struct DesktopRootView: View {
       }
 
       if let activeTab {
-        EmbeddedTerminalView(
-          sessionStore: activeTab.terminalStore,
-          focusToken: terminalFocusToken
-        )
+        Group {
+          if let tmuxController = activeTab.terminalStore.tmuxController {
+            TmuxWorkspaceView(
+              controller: tmuxController,
+              focusToken: terminalFocusToken
+            )
+          } else {
+            EmbeddedTerminalView(
+              sessionStore: activeTab.terminalStore,
+              focusToken: terminalFocusToken
+            )
+          }
+        }
           .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
           .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -436,7 +468,7 @@ struct DesktopRootView: View {
           Button("Login in Terminal") {
             openLoginInApp()
           }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(ActionButtonStyle(prominent: true))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
@@ -711,12 +743,38 @@ struct DesktopRootView: View {
     return "Open in \(terminalApplication.displayName)"
   }
 
+  private var alternativeConnectionTitle: String {
+    settings.useTmuxByDefault ? "SSH" : "Tmux"
+  }
+
+  private var alternativeConnectionHelp: String {
+    settings.useTmuxByDefault
+      ? "Open a regular SSH terminal"
+      : "Open a persistent remote tmux workspace"
+  }
+
   private func resolvedLogin(for node: TeleportNode) -> String? {
     node.preferredLogin(
       labelKey: settings.normalizedLoginLabelKey,
       fallback: settings.normalizedFallbackLogin,
       allowedLogins: store.session.logins
     )
+  }
+
+  private func openNodeUsingPreferredMode(node: TeleportNode) {
+    if settings.useTmuxByDefault {
+      openNodeWithTmux(node: node)
+    } else {
+      openNodeInApp(node: node)
+    }
+  }
+
+  private func openNodeUsingAlternativeMode(node: TeleportNode) {
+    if settings.useTmuxByDefault {
+      openNodeInApp(node: node)
+    } else {
+      openNodeWithTmux(node: node)
+    }
   }
 
   private func openNodeInApp(node: TeleportNode) {
@@ -744,6 +802,44 @@ struct DesktopRootView: View {
     requestTerminalFocus()
   }
 
+  private func openNodeWithTmux(node: TeleportNode) {
+    guard let command = store.tmuxControlCommand(for: node, settings: settings) else {
+      store.errorMessage = "Could not resolve an SSH login for \(node.hostname)."
+      return
+    }
+
+    browserSelectedNodeID = node.id
+    let login = resolvedLogin(for: node) ?? "unknown"
+    let scopeKey = libraryScopeKey
+    let tab = tabStore.openTab(
+      windowState: .tmuxControl(
+        command,
+        title: "tmux · \(login)@\(library.name(for: node, scopeKey: scopeKey))",
+        summary: "Connecting to remote tmux as \(login)",
+        selectedNodeID: node.id,
+        connectedNodeID: node.id
+      )
+    )
+    tab.terminalStore.onConnectionEstablished = { [library] in
+      library.recordRecent(nodeID: node.id, scopeKey: scopeKey)
+    }
+    let tabID = tab.id
+    tab.terminalStore.onTmuxSessionEnded = { [weak tabStore] in
+      _ = tabStore?.closeTab(id: tabID)
+    }
+    requestTerminalFocus()
+  }
+
+  private func handlePendingNodeConnection() {
+    guard let request = navigation.nodeConnectionRequest,
+          let node = store.nodes.first(where: { $0.id == request.nodeID }) else {
+      return
+    }
+
+    navigation.consumeConnectionRequest(id: request.id)
+    openNodeUsingPreferredMode(node: node)
+  }
+
   private func openLoginInApp() {
     let command = store.loginCommand(using: settings)
 
@@ -762,7 +858,7 @@ struct DesktopRootView: View {
       return
     }
 
-    openNodeInApp(node: node)
+    openNodeUsingPreferredMode(node: node)
   }
 
   private func openSelectionExternally(_ selectedIDs: Set<String>) {
@@ -1139,17 +1235,17 @@ private struct FileTransferView: View {
           .frame(maxWidth: .infinity, minHeight: 90)
           .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ActionButtonStyle())
         .background(.quaternary.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .disabled(isTransferring)
 
         Button("Upload", action: onUpload)
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(ActionButtonStyle(prominent: true))
           .disabled(uploadURLs.isEmpty || remotePathIsEmpty || isTransferring)
       } else {
         Button("Choose Destination and Download", action: onChooseDownloadDirectory)
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(ActionButtonStyle(prominent: true))
           .disabled(remotePathIsEmpty || isTransferring)
       }
 
@@ -1172,6 +1268,7 @@ private struct FileTransferView: View {
           }
 
           Button("Cancel", role: .destructive, action: onCancel)
+            .buttonStyle(ActionButtonStyle())
         }
         .frame(maxWidth: .infinity)
       }

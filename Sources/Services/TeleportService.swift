@@ -96,6 +96,28 @@ struct TeleportService {
     return ShellQuoter.join(["tsh", "ssh", "\(login)@\(node.hostname)"])
   }
 
+  func tmuxControlCommand(
+    for node: TeleportNode,
+    settings: SettingsStore,
+    session: TeleportSession
+  ) -> String? {
+    let login = node.preferredLogin(
+      labelKey: settings.normalizedLoginLabelKey,
+      fallback: settings.normalizedFallbackLogin,
+      allowedLogins: session.logins
+    )
+
+    guard let login else {
+      return nil
+    }
+
+    return ShellQuoter.join([
+      "tsh", "ssh", "-t", "\(login)@\(node.hostname)",
+      "tmux", "-CC", "new-session", "-A", "-s", "teleport-desktop",
+      "-x", "120", "-y", "40"
+    ])
+  }
+
   static func normalizeProxyAddress(_ value: String?) -> String? {
     guard let value = value?
       .trimmingCharacters(in: .whitespacesAndNewlines),

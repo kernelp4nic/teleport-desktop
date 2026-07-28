@@ -48,7 +48,7 @@ struct ServerRowView: View {
         .help(isFavorite ? "Remove from favorites" : "Add to favorites")
 
         Button("Connect", action: onConnect)
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(ActionButtonStyle(prominent: true))
           .controlSize(.small)
           .disabled(resolvedLogin == nil)
       }
