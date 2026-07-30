@@ -35,6 +35,35 @@ struct SettingsStoreTests {
     #expect(settings.terminalScrollbackLines == 0)
   }
 
+  @Test func soundFeedbackUsesSaneDefaults() {
+    let settings = SettingsStore(defaults: makeDefaults())
+
+    #expect(settings.soundFeedbackEnabled)
+    #expect(settings.soundFeedbackVolume == 0.65)
+  }
+
+  @Test func soundFeedbackPreferencesArePersisted() {
+    let defaults = makeDefaults()
+    let settings = SettingsStore(defaults: defaults)
+
+    settings.soundFeedbackEnabled = false
+    settings.soundFeedbackVolume = 0.25
+
+    let restoredSettings = SettingsStore(defaults: defaults)
+    #expect(!restoredSettings.soundFeedbackEnabled)
+    #expect(restoredSettings.soundFeedbackVolume == 0.25)
+  }
+
+  @Test func soundFeedbackVolumeIsClamped() {
+    let settings = SettingsStore(defaults: makeDefaults())
+
+    settings.soundFeedbackVolume = 2
+    #expect(settings.soundFeedbackVolume == 1)
+
+    settings.soundFeedbackVolume = -1
+    #expect(settings.soundFeedbackVolume == 0)
+  }
+
   private func makeDefaults() -> UserDefaults {
     let suiteName = "SettingsStoreTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!

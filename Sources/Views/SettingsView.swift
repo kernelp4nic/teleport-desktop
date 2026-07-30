@@ -36,6 +36,30 @@ struct SettingsView: View {
           .foregroundStyle(.secondary)
       }
 
+      Section("Sound Feedback") {
+        Toggle("Play sounds for app actions", isOn: $settings.soundFeedbackEnabled)
+
+        HStack {
+          Image(systemName: "speaker.fill")
+            .foregroundStyle(.secondary)
+
+          Slider(value: $settings.soundFeedbackVolume, in: 0...1)
+            .disabled(!settings.soundFeedbackEnabled)
+
+          Image(systemName: "speaker.wave.3.fill")
+            .foregroundStyle(.secondary)
+
+          Text(settings.soundFeedbackVolume, format: .percent.precision(.fractionLength(0)))
+            .monospacedDigit()
+            .frame(width: 42, alignment: .trailing)
+        }
+
+        Button("Preview sound") {
+          SoundFeedbackService.play(.completed, settings: settings)
+        }
+        .disabled(!settings.soundFeedbackEnabled || settings.soundFeedbackVolume == 0)
+      }
+
       Section("Server Cache") {
         Button("Refresh server cache") {
           Task {

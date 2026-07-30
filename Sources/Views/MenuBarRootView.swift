@@ -336,6 +336,7 @@ struct MenuBarRootView: View {
 
   private func toggleFavorite(for node: TeleportNode) {
     library.toggleFavorite(nodeID: node.id, scopeKey: libraryScopeKey)
+    SoundFeedbackService.play(.favorite, settings: settings)
   }
 }
 

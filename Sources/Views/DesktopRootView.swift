@@ -723,6 +723,7 @@ struct DesktopRootView: View {
   private func openNodeInApp(node: TeleportNode) {
     guard let command = store.connectCommand(for: node, settings: settings) else {
       store.errorMessage = "Could not resolve an SSH login for \(node.hostname)."
+      SoundFeedbackService.play(.error, settings: settings)
       return
     }
 
@@ -741,7 +742,9 @@ struct DesktopRootView: View {
     )
     tab.terminalStore.onConnectionEstablished = { [library] in
       library.recordRecent(nodeID: node.id, scopeKey: scopeKey)
+      SoundFeedbackService.play(.connected, settings: settings)
     }
+    SoundFeedbackService.play(.action, settings: settings)
     requestTerminalFocus()
   }
 
@@ -755,6 +758,7 @@ struct DesktopRootView: View {
         summary: "Running tsh login in the embedded terminal"
       )
     )
+    SoundFeedbackService.play(.action, settings: settings)
     requestTerminalFocus()
   }
 
@@ -797,6 +801,7 @@ struct DesktopRootView: View {
 
   private func toggleFavorite(for node: TeleportNode) {
     library.toggleFavorite(nodeID: node.id, scopeKey: libraryScopeKey)
+    SoundFeedbackService.play(.favorite, settings: settings)
   }
 
   private func rowID(sectionID: String, nodeID: String) -> String {
@@ -895,6 +900,7 @@ struct DesktopRootView: View {
     browserSelectedNodeID = tab.selectedNodeID
     browserSelectedRowID = tab.selectedNodeID.flatMap(preferredRowID(for:))
     _ = tabStore.closeTab(id: tab.id)
+    SoundFeedbackService.play(.dismissed, settings: settings)
   }
 
   private func closeSelectedTabFromShortcut() -> Bool {
@@ -1013,8 +1019,10 @@ struct DesktopRootView: View {
         }
         fileTransferDirection = nil
         showFileTransferToast("Upload complete")
+        SoundFeedbackService.play(.completed, settings: settings)
       } catch {
         fileTransferMessage = error.localizedDescription
+        SoundFeedbackService.play(.error, settings: settings)
       }
 
       isTransferringFile = false
@@ -1059,8 +1067,10 @@ struct DesktopRootView: View {
         }
         fileTransferDirection = nil
         showFileTransferToast("Download complete")
+        SoundFeedbackService.play(.completed, settings: settings)
       } catch {
         fileTransferMessage = error.localizedDescription
+        SoundFeedbackService.play(.error, settings: settings)
       }
 
       isTransferringFile = false

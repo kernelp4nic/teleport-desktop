@@ -4,6 +4,7 @@ import Observation
 @Observable
 final class SettingsStore {
   static let defaultTerminalScrollbackLines = 10_000
+  static let defaultSoundFeedbackVolume = 0.65
 
   private enum Keys {
     static let proxyAddress = "proxyAddress"
@@ -12,6 +13,8 @@ final class SettingsStore {
     static let fallbackLogin = "fallbackLogin"
     static let terminalApplicationID = "terminalApplicationID"
     static let terminalScrollbackLines = "terminalScrollbackLines"
+    static let soundFeedbackEnabled = "soundFeedbackEnabled"
+    static let soundFeedbackVolume = "soundFeedbackVolume"
   }
 
   @ObservationIgnored private let defaults: UserDefaults
@@ -55,6 +58,23 @@ final class SettingsStore {
     }
   }
 
+  var soundFeedbackEnabled: Bool {
+    didSet {
+      defaults.set(soundFeedbackEnabled, forKey: Keys.soundFeedbackEnabled)
+    }
+  }
+
+  var soundFeedbackVolume: Double {
+    didSet {
+      let clampedVolume = min(max(soundFeedbackVolume, 0), 1)
+      if soundFeedbackVolume != clampedVolume {
+        soundFeedbackVolume = clampedVolume
+        return
+      }
+      defaults.set(soundFeedbackVolume, forKey: Keys.soundFeedbackVolume)
+    }
+  }
+
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
     proxyAddress = defaults.string(forKey: Keys.proxyAddress) ?? ""
@@ -66,6 +86,12 @@ final class SettingsStore {
     terminalScrollbackLines = defaults.object(forKey: Keys.terminalScrollbackLines) == nil
       ? Self.defaultTerminalScrollbackLines
       : max(0, defaults.integer(forKey: Keys.terminalScrollbackLines))
+    soundFeedbackEnabled = defaults.object(forKey: Keys.soundFeedbackEnabled) == nil
+      ? true
+      : defaults.bool(forKey: Keys.soundFeedbackEnabled)
+    soundFeedbackVolume = defaults.object(forKey: Keys.soundFeedbackVolume) == nil
+      ? Self.defaultSoundFeedbackVolume
+      : min(max(defaults.double(forKey: Keys.soundFeedbackVolume), 0), 1)
   }
 
   var normalizedProxyAddress: String? {

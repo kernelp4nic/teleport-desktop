@@ -131,6 +131,7 @@ Open **Settings** to configure:
 - **Login label** — choose the label used to resolve the SSH username.
 - **Fallback login** — provide a default when a node has no matching label.
 - **Terminal application** — choose where external sessions should open.
+- **Sound feedback** — enable or disable action sounds and adjust their volume.
 
 Node names, favorites, and recent-node history are local preferences. Renaming a
 node changes only its display name in Teleport Desktop; connections still use the

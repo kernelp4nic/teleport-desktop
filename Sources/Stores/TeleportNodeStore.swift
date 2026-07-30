@@ -96,11 +96,19 @@ final class TeleportNodeStore {
     }
 
     isRefreshing = false
+
+    if forceRefresh {
+      SoundFeedbackService.play(
+        result.errorMessage == nil ? .completed : .error,
+        settings: settings
+      )
+    }
   }
 
   func connect(to node: TeleportNode, settings: SettingsStore) {
     guard let command = connectCommand(for: node, settings: settings) else {
       errorMessage = "Could not resolve an SSH login for \(node.hostname)."
+      SoundFeedbackService.play(.error, settings: settings)
       return
     }
 
@@ -110,8 +118,10 @@ final class TeleportNodeStore {
         label: node.hostname,
         terminalApplication: settings.selectedTerminalApplication
       )
+      SoundFeedbackService.play(.action, settings: settings)
     } catch {
       errorMessage = error.localizedDescription
+      SoundFeedbackService.play(.error, settings: settings)
     }
   }
 
@@ -122,8 +132,10 @@ final class TeleportNodeStore {
         label: "teleport-login",
         terminalApplication: settings.selectedTerminalApplication
       )
+      SoundFeedbackService.play(.action, settings: settings)
     } catch {
       errorMessage = error.localizedDescription
+      SoundFeedbackService.play(.error, settings: settings)
     }
   }
 
