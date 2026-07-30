@@ -24,6 +24,18 @@ struct SettingsView: View {
         .pickerStyle(.menu)
       }
 
+      Section("Embedded Terminal") {
+        TextField(
+          "Scrollback lines",
+          value: $settings.terminalScrollbackLines,
+          format: .number
+        )
+
+        Text("Set to 0 to disable scrollback.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
       Section("Server Cache") {
         Button("Refresh server cache") {
           Task {

@@ -5,15 +5,18 @@ import SwiftUI
 struct EmbeddedTerminalView: NSViewRepresentable {
   let sessionStore: TerminalSessionStore
   let focusToken: Int
+  let scrollbackLines: Int
 
   func makeNSView(context: Context) -> TerminalContainerView {
     let containerView = TerminalContainerView()
+    sessionStore.terminalController.setScrollbackLines(scrollbackLines)
     containerView.attach(hostView: sessionStore.terminalController.hostView)
     containerView.focusTerminalIfNeeded(using: focusToken)
     return containerView
   }
 
   func updateNSView(_ nsView: TerminalContainerView, context: Context) {
+    sessionStore.terminalController.setScrollbackLines(scrollbackLines)
     nsView.attach(hostView: sessionStore.terminalController.hostView)
     nsView.focusTerminalIfNeeded(using: focusToken)
   }
@@ -49,6 +52,10 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
 
   func findPrevious() {
     hostView.findPrevious()
+  }
+
+  func setScrollbackLines(_ lines: Int) {
+    hostView.setScrollbackLines(lines)
   }
 
   func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
@@ -133,6 +140,7 @@ final class ObservedLocalProcessTerminalView: LocalProcessTerminalView {
 
 final class TerminalHostView: NSView {
   private let contentInset: CGFloat = 12
+  private var scrollbackLines = SettingsStore.defaultTerminalScrollbackLines
   private(set) var terminalView: ObservedLocalProcessTerminalView?
 
   override init(frame frameRect: NSRect) {
@@ -170,6 +178,7 @@ final class TerminalHostView: NSView {
     terminalView.caretColor = .controlAccentColor
     terminalView.processDelegate = delegate
     terminalView.onFirstOutput = onFirstOutput
+    terminalView.changeScrollback(scrollbackLines == 0 ? nil : scrollbackLines)
 
     addSubview(terminalView)
 
@@ -189,6 +198,16 @@ final class TerminalHostView: NSView {
     )
 
     self.terminalView = terminalView
+  }
+
+  func setScrollbackLines(_ lines: Int) {
+    let normalizedLines = max(0, lines)
+    guard scrollbackLines != normalizedLines else {
+      return
+    }
+
+    scrollbackLines = normalizedLines
+    terminalView?.changeScrollback(normalizedLines == 0 ? nil : normalizedLines)
   }
 
   func focusTerminal() {

@@ -3,12 +3,15 @@ import Observation
 
 @Observable
 final class SettingsStore {
+  static let defaultTerminalScrollbackLines = 10_000
+
   private enum Keys {
     static let proxyAddress = "proxyAddress"
     static let groupingLabelKey = "groupingLabelKey"
     static let loginLabelKey = "loginLabelKey"
     static let fallbackLogin = "fallbackLogin"
     static let terminalApplicationID = "terminalApplicationID"
+    static let terminalScrollbackLines = "terminalScrollbackLines"
   }
 
   @ObservationIgnored private let defaults: UserDefaults
@@ -43,6 +46,15 @@ final class SettingsStore {
     }
   }
 
+  var terminalScrollbackLines: Int {
+    didSet {
+      if terminalScrollbackLines < 0 {
+        terminalScrollbackLines = 0
+      }
+      defaults.set(terminalScrollbackLines, forKey: Keys.terminalScrollbackLines)
+    }
+  }
+
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
     proxyAddress = defaults.string(forKey: Keys.proxyAddress) ?? ""
@@ -51,6 +63,9 @@ final class SettingsStore {
     fallbackLogin = defaults.string(forKey: Keys.fallbackLogin) ?? ""
     terminalApplicationID = defaults.string(forKey: Keys.terminalApplicationID)
       ?? TerminalApplication.systemDefault.rawValue
+    terminalScrollbackLines = defaults.object(forKey: Keys.terminalScrollbackLines) == nil
+      ? Self.defaultTerminalScrollbackLines
+      : max(0, defaults.integer(forKey: Keys.terminalScrollbackLines))
   }
 
   var normalizedProxyAddress: String? {
