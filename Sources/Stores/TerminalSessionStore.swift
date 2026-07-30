@@ -39,7 +39,7 @@ final class TerminalSessionStore {
     terminalController.onProcessTerminated = { [weak self] exitCode in
       self?.processTerminated(exitCode: exitCode)
     }
-    terminalController.install(request)
+    terminalController.install(request, localEchoEnabled: windowState.connectedNodeID != nil)
   }
 
   func run(request: EmbeddedTerminalRequest, connectedNodeID: String?) {
@@ -50,7 +50,7 @@ final class TerminalSessionStore {
     connectionState = Self.initialConnectionState(for: connectedNodeID)
     lastExitStatus = nil
     didNotifyConnectionEstablished = false
-    terminalController.install(request)
+    terminalController.install(request, localEchoEnabled: connectedNodeID != nil)
   }
 
   func showSearch() {

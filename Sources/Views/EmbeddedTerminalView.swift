@@ -30,14 +30,18 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
   private var lastRequestID: UUID?
   private var didReportInitialOutput = false
 
-  func install(_ request: EmbeddedTerminalRequest) {
+  func install(_ request: EmbeddedTerminalRequest, localEchoEnabled: Bool) {
     guard lastRequestID != request.id || hostView.terminalView == nil else {
       return
     }
 
     lastRequestID = request.id
     didReportInitialOutput = false
-    hostView.launch(request: request, delegate: self) { [weak self] in
+    hostView.launch(
+      request: request,
+      delegate: self,
+      localEchoEnabled: localEchoEnabled
+    ) { [weak self] in
       self?.handleInitialOutput()
     }
   }
@@ -125,9 +129,34 @@ final class TerminalContainerView: NSView {
 final class ObservedLocalProcessTerminalView: LocalProcessTerminalView {
   var onFirstOutput: (() -> Void)?
   private var didReceiveOutput = false
+  private var localEchoEnabled = false
+  private var localEchoPredictor = LocalEchoPredictor()
+
+  func configureLocalEcho(enabled: Bool) {
+    localEchoEnabled = enabled
+    localEchoPredictor.reset()
+  }
+
+  override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+    if localEchoEnabled {
+      let update = localEchoPredictor.userInput(data)
+      if !update.bytesToDisplay.isEmpty {
+        feed(byteArray: update.bytesToDisplay[...])
+      }
+    }
+
+    super.send(source: source, data: data)
+  }
 
   override func dataReceived(slice: ArraySlice<UInt8>) {
-    super.dataReceived(slice: slice)
+    if localEchoEnabled {
+      let update = localEchoPredictor.processOutput(slice)
+      if !update.bytesToDisplay.isEmpty {
+        super.dataReceived(slice: update.bytesToDisplay[...])
+      }
+    } else {
+      super.dataReceived(slice: slice)
+    }
 
     guard !didReceiveOutput, !slice.isEmpty else {
       return
@@ -162,6 +191,7 @@ final class TerminalHostView: NSView {
   func launch(
     request: EmbeddedTerminalRequest,
     delegate: LocalProcessTerminalViewDelegate,
+    localEchoEnabled: Bool,
     onFirstOutput: @escaping () -> Void
   ) {
     if let terminalView {
@@ -178,6 +208,7 @@ final class TerminalHostView: NSView {
     terminalView.caretColor = .controlAccentColor
     terminalView.processDelegate = delegate
     terminalView.onFirstOutput = onFirstOutput
+    terminalView.configureLocalEcho(enabled: localEchoEnabled)
     terminalView.changeScrollback(scrollbackLines == 0 ? nil : scrollbackLines)
 
     addSubview(terminalView)
