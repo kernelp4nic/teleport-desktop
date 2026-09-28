@@ -85,7 +85,8 @@ or bypass Teleport's authentication and authorization model.
 - A working Teleport setup and access to a Teleport cluster.
 - [`tsh`](https://goteleport.com/docs/connect-your-client/tsh/) installed and
   available in `PATH`.
-- Xcode Command Line Tools when building from source.
+- Full Xcode with its Metal Toolchain when building from source (SwiftTerm
+  compiles Metal shaders; Command Line Tools alone are insufficient).
 
 Confirm that the CLI is available and that you have an active profile:
 
@@ -113,10 +114,19 @@ cd teleport-desktop
 The script builds the Swift package, creates the app bundle under `dist/`, and
 opens it.
 
+The script uses the selected developer tools, falling back to
+`/Applications/Xcode.app` if Command Line Tools are selected. You can choose a
+different Xcode installation with `DEVELOPER_DIR`. If its Metal Toolchain is
+missing, install it before building:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -downloadComponent MetalToolchain
+```
+
 To run the test suite:
 
 ```bash
-swift test
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift test
 ```
 
 > [!NOTE]

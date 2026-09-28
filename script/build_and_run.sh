@@ -19,10 +19,32 @@ APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_EXECUTABLE_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 
-pkill -x "$APP_EXECUTABLE_NAME" >/dev/null 2>&1 || true
+# SwiftTerm's shaders require full Xcode and its Metal Toolchain. Prefer the
+# selected tools, but fall back to the standard Xcode install when only CLT is
+# selected. Respect an explicit DEVELOPER_DIR override.
+if [[ -z "${DEVELOPER_DIR:-}" ]] && ! xcrun --find metal >/dev/null 2>&1; then
+  if [[ -d /Applications/Xcode.app/Contents/Developer ]]; then
+    export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+  fi
+fi
 
-swift build
-BUILD_BINARY="$(swift build --show-bin-path)/$APP_EXECUTABLE_NAME"
+if ! xcrun --find metal >/dev/null 2>&1; then
+  echo "error: SwiftTerm requires full Xcode with the Metal Toolchain." >&2
+  echo "Install Xcode and set DEVELOPER_DIR to its Contents/Developer directory." >&2
+  exit 1
+fi
+if ! xcrun metal --version >/dev/null 2>&1; then
+  echo "error: The selected Xcode's Metal compiler is unavailable. Install its toolchain:" >&2
+  printf '  DEVELOPER_DIR=%q xcodebuild -downloadComponent MetalToolchain\n' "${DEVELOPER_DIR:-$(xcode-select -p)}" >&2
+  exit 1
+fi
+
+cd "$ROOT_DIR"
+xcrun swift build
+BUILD_DIR="$(xcrun swift build --show-bin-path)"
+BUILD_BINARY="$BUILD_DIR/$APP_EXECUTABLE_NAME"
+
+pkill -x "$APP_EXECUTABLE_NAME" >/dev/null 2>&1 || true
 
 rm -rf "$APP_BUNDLE"
 if [[ "$LEGACY_APP_BUNDLE" != "$APP_BUNDLE" ]]; then
@@ -32,6 +54,11 @@ mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
 cp "$APP_ICON_SOURCE" "$APP_RESOURCES/$APP_ICON_NAME"
+# Preserve SwiftPM resources, including SwiftTerm's compiled Metal shaders.
+for resource_bundle in "$BUILD_DIR"/*.bundle; do
+  [[ -d "$resource_bundle" ]] || continue
+  cp -R "$resource_bundle" "$APP_RESOURCES/"
+done
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
