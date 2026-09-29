@@ -41,8 +41,6 @@ struct TeleportDesktopApp: App {
 
     Settings {
       SettingsView(settings: settingsStore, store: nodeStore)
-        .frame(width: 420)
-        .padding(20)
     }
   }
 }
