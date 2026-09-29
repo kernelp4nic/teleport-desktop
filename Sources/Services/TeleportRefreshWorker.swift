@@ -12,6 +12,10 @@ actor TeleportRefreshWorker {
     self.nodeCache = nodeCache
   }
 
+  func loadSession(proxyOverride: String?) -> TeleportSession {
+    teleportService.loadSession(proxyOverride: proxyOverride)
+  }
+
   func refresh(
     proxyOverride: String?,
     forceRefresh: Bool

@@ -19,6 +19,7 @@ struct DesktopRootView: View {
   @State private var fileTransferProgress: Double?
   @State private var fileTransferToastMessage: String?
   @State private var isTransferringFile = false
+  @State private var isLoginSheetPresented = false
   @State private var remoteFilePath = "~/"
   @State private var renamedNodeID: String?
   @State private var renamedNodeName = ""
@@ -71,7 +72,7 @@ struct DesktopRootView: View {
         .disabled(store.isLoading)
 
         Button {
-          store.login(using: settings)
+          presentLoginSheet()
         } label: {
           Label("Login", systemImage: "person.badge.key")
         }
@@ -123,6 +124,9 @@ struct DesktopRootView: View {
       syncSidebarSelectionToActiveTab()
       reconcileSelection()
       requestTerminalFocus()
+    }
+    .sheet(isPresented: $isLoginSheetPresented, onDismiss: loginSheetDismissed) {
+      TeleportLoginSheet(store: store, settings: settings)
     }
     .sheet(item: $fileTransferDirection) { direction in
       FileTransferView(
@@ -433,10 +437,10 @@ struct DesktopRootView: View {
         ContentUnavailableView {
           Label("Teleport Login Required", systemImage: "person.badge.key")
         } description: {
-          Text("Open a terminal tab to authenticate with Teleport.")
+          Text("Authenticate with Teleport to load your servers.")
         } actions: {
-          Button("Login in Terminal") {
-            openLoginInApp()
+          Button("Login") {
+            presentLoginSheet()
           }
           .buttonStyle(.borderedProminent)
         }
@@ -749,17 +753,13 @@ struct DesktopRootView: View {
     requestTerminalFocus()
   }
 
-  private func openLoginInApp() {
-    let command = store.loginCommand(using: settings)
-
-    _ = tabStore.openTab(
-      windowState: DesktopWindowState.command(
-        command,
-        title: "Teleport Login",
-        summary: "Running tsh login in the embedded terminal"
-      )
-    )
+  private func presentLoginSheet() {
     SoundFeedbackService.play(.action, settings: settings)
+    isLoginSheetPresented = true
+  }
+
+  private func loginSheetDismissed() {
+    reconcileSelection()
     requestTerminalFocus()
   }
 

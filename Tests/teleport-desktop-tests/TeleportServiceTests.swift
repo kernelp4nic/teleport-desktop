@@ -96,4 +96,15 @@ struct TeleportServiceTests {
 
     #expect(command == "tsh ssh ubuntu@acme.web01")
   }
+
+  @Test func loginCommandIncludesProxyAndUser() {
+    let service = TeleportService()
+
+    #expect(
+      service.loginCommand(proxy: "https://teleport.example.com/", user: " sebastianm ")
+        == "tsh login --proxy=teleport.example.com --user=sebastianm"
+    )
+    #expect(service.loginCommand(proxy: "teleport.example.com", user: "  ") == "tsh login --proxy=teleport.example.com")
+    #expect(service.loginCommand(proxy: nil) == "tsh login")
+  }
 }

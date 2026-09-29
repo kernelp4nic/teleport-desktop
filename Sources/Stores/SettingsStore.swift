@@ -8,6 +8,7 @@ final class SettingsStore {
 
   private enum Keys {
     static let proxyAddress = "proxyAddress"
+    static let teleportUser = "teleportUser"
     static let groupingLabelKey = "groupingLabelKey"
     static let loginLabelKey = "loginLabelKey"
     static let fallbackLogin = "fallbackLogin"
@@ -23,6 +24,12 @@ final class SettingsStore {
   var proxyAddress: String {
     didSet {
       defaults.set(proxyAddress, forKey: Keys.proxyAddress)
+    }
+  }
+
+  var teleportUser: String {
+    didSet {
+      defaults.set(teleportUser, forKey: Keys.teleportUser)
     }
   }
 
@@ -85,6 +92,7 @@ final class SettingsStore {
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
     proxyAddress = defaults.string(forKey: Keys.proxyAddress) ?? ""
+    teleportUser = defaults.string(forKey: Keys.teleportUser) ?? ""
     groupingLabelKey = defaults.string(forKey: Keys.groupingLabelKey) ?? "customer"
     loginLabelKey = defaults.string(forKey: Keys.loginLabelKey) ?? "user"
     fallbackLogin = defaults.string(forKey: Keys.fallbackLogin) ?? ""
@@ -104,6 +112,10 @@ final class SettingsStore {
 
   var normalizedProxyAddress: String? {
     TeleportService.normalizeProxyAddress(proxyAddress)
+  }
+
+  var normalizedTeleportUser: String? {
+    Self.normalizedValue(teleportUser)
   }
 
   var normalizedGroupingLabelKey: String? {

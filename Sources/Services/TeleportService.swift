@@ -68,11 +68,15 @@ struct TeleportService {
     return try Self.parseNodes(from: result.stdout)
   }
 
-  func loginCommand(proxy: String?) -> String {
+  func loginCommand(proxy: String?, user: String? = nil) -> String {
     var segments = ["tsh", "login"]
 
     if let proxy = Self.normalizeProxyAddress(proxy) {
       segments.append("--proxy=\(proxy)")
+    }
+
+    if let user = user?.trimmingCharacters(in: .whitespacesAndNewlines), !user.isEmpty {
+      segments.append("--user=\(user)")
     }
 
     return ShellQuoter.join(segments)

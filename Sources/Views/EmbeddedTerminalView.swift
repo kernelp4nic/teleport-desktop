@@ -52,6 +52,10 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
     }
   }
 
+  func terminate() {
+    hostView.terminate()
+  }
+
   func showSearch() {
     hostView.showSearch()
   }
@@ -245,6 +249,11 @@ final class TerminalHostView: NSView {
     )
 
     self.terminalView = terminalView
+  }
+
+  func terminate() {
+    terminalView?.processDelegate = nil
+    terminalView?.terminate()
   }
 
   func setScrollbackLines(_ lines: Int) {

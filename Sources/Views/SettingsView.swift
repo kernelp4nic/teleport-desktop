@@ -9,6 +9,7 @@ struct SettingsView: View {
     Form {
       Section("Teleport") {
         TextField("Proxy override", text: $settings.proxyAddress, prompt: Text("teleport.example.com:443"))
+        TextField("Teleport user", text: $settings.teleportUser, prompt: Text(NSUserName()))
         TextField("Grouping label", text: $settings.groupingLabelKey, prompt: Text("customer"))
         TextField("Login label", text: $settings.loginLabelKey, prompt: Text("user"))
         TextField("Fallback login", text: $settings.fallbackLogin, prompt: Text("ubuntu"))
@@ -82,6 +83,7 @@ struct SettingsView: View {
 
       Section("Behavior") {
         Text("Leave proxy empty to reuse the active tsh profile.")
+        Text("Teleport user is passed to tsh login as --user. Leave it empty to use your macOS user name.")
         Text("Leave grouping label empty to show a flat list.")
         Text("The login label is checked first. If it is missing or invalid, the app falls back to the manual login or the first active tsh login.")
         Text("The desktop app uses an embedded shell by default. External terminal settings are only used when you choose to open a session outside the app.")

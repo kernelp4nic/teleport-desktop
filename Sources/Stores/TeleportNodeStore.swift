@@ -9,6 +9,8 @@ final class TeleportNodeStore {
   @ObservationIgnored private let refreshWorker: TeleportRefreshWorker
   @ObservationIgnored private let terminalLauncher: TerminalLauncher
   @ObservationIgnored private let autoRefreshCooldown: TimeInterval
+  @ObservationIgnored private let sessionPollInterval: Duration
+  @ObservationIgnored private var sessionPollTask: Task<Void, Never>?
   @ObservationIgnored private let isDemoMode: Bool
   @ObservationIgnored private var isRefreshing = false
 
@@ -24,6 +26,7 @@ final class TeleportNodeStore {
     nodeCache: TeleportNodeCache = TeleportNodeCache(),
     terminalLauncher: TerminalLauncher = TerminalLauncher(),
     autoRefreshCooldown: TimeInterval = 120,
+    sessionPollInterval: Duration = .seconds(5),
     environment: [String: String] = ProcessInfo.processInfo.environment
   ) {
     self.teleportService = teleportService
@@ -31,6 +34,7 @@ final class TeleportNodeStore {
     refreshWorker = TeleportRefreshWorker()
     self.terminalLauncher = terminalLauncher
     self.autoRefreshCooldown = autoRefreshCooldown
+    self.sessionPollInterval = sessionPollInterval
     isDemoMode = environment["TELEPORT_DESKTOP_DEMO"] == "1"
 
     if isDemoMode {
@@ -97,6 +101,12 @@ final class TeleportNodeStore {
 
     isRefreshing = false
 
+    if session.isActive {
+      stopSessionPolling()
+    } else {
+      startSessionPollingIfNeeded(using: settings)
+    }
+
     if forceRefresh {
       SoundFeedbackService.play(
         result.errorMessage == nil ? .completed : .error,
@@ -148,7 +158,49 @@ final class TeleportNodeStore {
   }
 
   func loginCommand(using settings: SettingsStore) -> String {
-    teleportService.loginCommand(proxy: session.proxy ?? settings.normalizedProxyAddress)
+    teleportService.loginCommand(
+      proxy: session.proxy ?? settings.normalizedProxyAddress,
+      user: settings.normalizedTeleportUser
+    )
+  }
+
+  /// Polls `tsh status` until a session becomes active (e.g. after `tsh login`
+  /// finishes in a terminal), then performs a full refresh and stops polling.
+  private func startSessionPollingIfNeeded(using settings: SettingsStore) {
+    guard sessionPollTask == nil else {
+      return
+    }
+
+    let interval = sessionPollInterval
+    sessionPollTask = Task { [weak self, refreshWorker] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: interval)
+
+        guard !Task.isCancelled else {
+          return
+        }
+
+        let proxyOverride = settings.normalizedProxyAddress
+        let probed = await refreshWorker.loadSession(proxyOverride: proxyOverride)
+
+        guard probed.isActive else {
+          continue
+        }
+
+        guard let self else {
+          return
+        }
+
+        sessionPollTask = nil
+        await refresh(using: settings)
+        return
+      }
+    }
+  }
+
+  private func stopSessionPolling() {
+    sessionPollTask?.cancel()
+    sessionPollTask = nil
   }
 
   private var shouldAutoRefresh: Bool {
