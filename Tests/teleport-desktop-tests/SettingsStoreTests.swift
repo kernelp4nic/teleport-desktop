@@ -3,6 +3,16 @@ import Testing
 @testable import teleport_desktop
 
 struct SettingsStoreTests {
+  @Test func localEchoDefaultsToDisabledAndPersistsBothValues() {
+    let defaults = makeDefaults()
+    let settings = SettingsStore(defaults: defaults)
+    #expect(!settings.localEchoEnabled)
+    settings.localEchoEnabled = true
+    #expect(SettingsStore(defaults: defaults).localEchoEnabled)
+    settings.localEchoEnabled = false
+    #expect(!SettingsStore(defaults: defaults).localEchoEnabled)
+  }
+
   @Test func terminalScrollbackUsesSaneDefault() {
     let defaults = makeDefaults()
 

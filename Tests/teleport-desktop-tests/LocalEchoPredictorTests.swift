@@ -71,7 +71,7 @@ struct LocalEchoPredictorTests {
     )
   }
 
-  @Test func keepsPredictingAfterBackspaceAndRetype() {
+  @Test func suspendsPredictionAfterBackspaceAndRetype() {
     var predictor = LocalEchoPredictor()
     _ = predictor.processOutput(Array("$ ".utf8)[...])
 
@@ -81,10 +81,50 @@ struct LocalEchoPredictorTests {
     _ = predictor.processOutput([0x08, 0x20, 0x08][...])
     let replacement = predictor.userInput(Array("g".utf8)[...])
 
-    #expect(predictor.isReadyForInput)
-    #expect(
-      String(decoding: replacement.bytesToDisplay, as: UTF8.self)
-        == "\u{001B}[4mg\u{001B}[24m"
-    )
+    #expect(!predictor.isReadyForInput)
+    #expect(replacement.bytesToDisplay.isEmpty)
+  }
+
+  @Test func historyHomeAndMiddleInsertionPreserveRemoteRedraw() {
+    var predictor = LocalEchoPredictor()
+    _ = predictor.processOutput(Array("$ ".utf8)[...])
+    _ = predictor.userInput(Array("\u{001B}[A".utf8)[...])
+    _ = predictor.processOutput(Array("zgrep \"previous command\" file.gz".utf8)[...])
+    _ = predictor.userInput(Array("\u{001B}[H".utf8)[...])
+    _ = predictor.processOutput(Array("\r$ ".utf8)[...])
+    _ = predictor.userInput(Array("\u{001B}[C".utf8)[...])
+    let insertion = predictor.userInput(Array("-".utf8)[...])
+    let redraw = Array("-\"previous command\" file.gz\u{001B}[25D".utf8)
+
+    #expect(insertion.bytesToDisplay.isEmpty)
+    #expect(predictor.processOutput(redraw[...]).bytesToDisplay == redraw)
+    #expect(!predictor.isReadyForInput)
+
+    _ = predictor.userInput([0x0d][...])
+    _ = predictor.processOutput(Array("\r\n$ ".utf8)[...])
+    #expect(!predictor.userInput(Array("pwd".utf8)[...]).bytesToDisplay.isEmpty)
+  }
+
+  @Test func navigationRollsBackPendingEchoBeforeCursorMoves() {
+    var predictor = LocalEchoPredictor()
+    _ = predictor.processOutput(Array("$ ".utf8)[...])
+    _ = predictor.userInput(Array("abc".utf8)[...])
+    let navigation = predictor.userInput(Array("\u{001B}[D".utf8)[...])
+    #expect(String(decoding: navigation.bytesToDisplay, as: UTF8.self) == "\u{001B}[3D\u{001B}[K")
+    let remote = Array("abc\u{0008}".utf8)
+    #expect(predictor.processOutput(remote[...]).bytesToDisplay == remote)
+    #expect(predictor.userInput(Array("x".utf8)[...]).bytesToDisplay.isEmpty)
+  }
+
+  @Test func disablingWithPendingEchoRestoresRemotePassthrough() {
+    var predictor = LocalEchoPredictor()
+    _ = predictor.processOutput(Array("$ ".utf8)[...])
+    _ = predictor.userInput(Array("abc".utf8)[...])
+    #expect(!predictor.cancelPendingInput().bytesToDisplay.isEmpty)
+    #expect(predictor.cancelPendingInput().bytesToDisplay.isEmpty)
+    predictor.reset()
+    let remote = Array("abc".utf8)
+    #expect(predictor.processOutput(remote[...]).bytesToDisplay == remote)
+    #expect(!predictor.isReadyForInput)
   }
 }

@@ -13,6 +13,7 @@ final class SettingsStore {
     static let fallbackLogin = "fallbackLogin"
     static let terminalApplicationID = "terminalApplicationID"
     static let terminalScrollbackLines = "terminalScrollbackLines"
+    static let localEchoEnabled = "localEchoEnabled"
     static let soundFeedbackEnabled = "soundFeedbackEnabled"
     static let soundFeedbackVolume = "soundFeedbackVolume"
   }
@@ -58,6 +59,12 @@ final class SettingsStore {
     }
   }
 
+  var localEchoEnabled: Bool {
+    didSet {
+      defaults.set(localEchoEnabled, forKey: Keys.localEchoEnabled)
+    }
+  }
+
   var soundFeedbackEnabled: Bool {
     didSet {
       defaults.set(soundFeedbackEnabled, forKey: Keys.soundFeedbackEnabled)
@@ -86,6 +93,7 @@ final class SettingsStore {
     terminalScrollbackLines = defaults.object(forKey: Keys.terminalScrollbackLines) == nil
       ? Self.defaultTerminalScrollbackLines
       : max(0, defaults.integer(forKey: Keys.terminalScrollbackLines))
+    localEchoEnabled = defaults.bool(forKey: Keys.localEchoEnabled)
     soundFeedbackEnabled = defaults.object(forKey: Keys.soundFeedbackEnabled) == nil
       ? true
       : defaults.bool(forKey: Keys.soundFeedbackEnabled)

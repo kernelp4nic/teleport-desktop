@@ -6,9 +6,11 @@ struct EmbeddedTerminalView: NSViewRepresentable {
   let sessionStore: TerminalSessionStore
   let focusToken: Int
   let scrollbackLines: Int
+  let localEchoEnabled: Bool
 
   func makeNSView(context: Context) -> TerminalContainerView {
     let containerView = TerminalContainerView()
+    sessionStore.terminalController.setLocalEchoEnabled(localEchoEnabled)
     sessionStore.terminalController.setScrollbackLines(scrollbackLines)
     containerView.attach(hostView: sessionStore.terminalController.hostView)
     containerView.focusTerminalIfNeeded(using: focusToken)
@@ -16,6 +18,7 @@ struct EmbeddedTerminalView: NSViewRepresentable {
   }
 
   func updateNSView(_ nsView: TerminalContainerView, context: Context) {
+    sessionStore.terminalController.setLocalEchoEnabled(localEchoEnabled)
     sessionStore.terminalController.setScrollbackLines(scrollbackLines)
     nsView.attach(hostView: sessionStore.terminalController.hostView)
     nsView.focusTerminalIfNeeded(using: focusToken)
@@ -29,18 +32,21 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
   var onProcessOutput: (@MainActor () -> Void)?
   private var lastRequestID: UUID?
   private var didReportInitialOutput = false
+  private var localEchoPreference = false
+  private var supportsLocalEcho = false
 
   func install(_ request: EmbeddedTerminalRequest, localEchoEnabled: Bool) {
     guard lastRequestID != request.id || hostView.terminalView == nil else {
       return
     }
 
+    supportsLocalEcho = localEchoEnabled
     lastRequestID = request.id
     didReportInitialOutput = false
     hostView.launch(
       request: request,
       delegate: self,
-      localEchoEnabled: localEchoEnabled
+      localEchoEnabled: localEchoEnabled && localEchoPreference
     ) { [weak self] in
       self?.handleInitialOutput()
     }
@@ -56,6 +62,11 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
 
   func findPrevious() {
     hostView.findPrevious()
+  }
+
+  func setLocalEchoEnabled(_ enabled: Bool) {
+    localEchoPreference = enabled
+    hostView.terminalView?.configureLocalEcho(enabled: enabled && supportsLocalEcho)
   }
 
   func setScrollbackLines(_ lines: Int) {
@@ -133,6 +144,11 @@ final class ObservedLocalProcessTerminalView: LocalProcessTerminalView {
   private var localEchoPredictor = LocalEchoPredictor()
 
   func configureLocalEcho(enabled: Bool) {
+    guard localEchoEnabled != enabled else { return }
+    let update = localEchoPredictor.cancelPendingInput()
+    if !update.bytesToDisplay.isEmpty {
+      feed(byteArray: update.bytesToDisplay[...])
+    }
     localEchoEnabled = enabled
     localEchoPredictor.reset()
   }

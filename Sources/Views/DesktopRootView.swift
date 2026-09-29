@@ -420,7 +420,8 @@ struct DesktopRootView: View {
         EmbeddedTerminalView(
           sessionStore: activeTab.terminalStore,
           focusToken: terminalFocusToken,
-          scrollbackLines: settings.terminalScrollbackLines
+          scrollbackLines: settings.terminalScrollbackLines,
+          localEchoEnabled: settings.localEchoEnabled
         )
           .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
           .overlay(

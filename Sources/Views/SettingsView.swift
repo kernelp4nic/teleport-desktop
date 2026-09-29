@@ -25,6 +25,11 @@ struct SettingsView: View {
       }
 
       Section("Embedded Terminal") {
+        Toggle("Local echo", isOn: $settings.localEchoEnabled)
+        Text("Predict typed characters before the server responds. Applies to SSH sessions; disabled by default.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+
         TextField(
           "Scrollback lines",
           value: $settings.terminalScrollbackLines,

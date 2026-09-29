@@ -10,9 +10,11 @@ struct LocalEchoPredictor {
   private(set) var isReadyForInput = false
   private var pendingBytes: [UInt8] = []
   private var outputParser = OutputParser()
+  private var suspendedUntilSubmit = false
 
   mutating func reset() {
     isReadyForInput = false
+    suspendedUntilSubmit = false
     pendingBytes.removeAll(keepingCapacity: true)
     outputParser = OutputParser()
   }
@@ -20,18 +22,31 @@ struct LocalEchoPredictor {
   mutating func userInput(_ bytes: ArraySlice<UInt8>) -> LocalEchoUpdate {
     let input = Array(bytes)
 
-    guard isReadyForInput,
-          !input.isEmpty,
-          pendingBytes.count + input.count <= Self.maximumPendingBytes,
-          input.allSatisfy({ $0 >= 0x20 && $0 <= 0x7e }) else {
-      if input.contains(where: { $0 == 0x0a || $0 == 0x0d }) {
-        isReadyForInput = false
-      }
+    guard !input.isEmpty else { return LocalEchoUpdate(bytesToDisplay: []) }
+
+    // Navigation, history, completion and deletion invalidate our append-only
+    // model. Remove predictions before the remote shell moves its cursor.
+    guard input.allSatisfy({ $0 >= 0x20 && $0 <= 0x7e }),
+          pendingBytes.count + input.count <= Self.maximumPendingBytes else {
+      let update = cancelPendingInput()
+      suspendedUntilSubmit = !input.contains(where: { $0 == 0x0a || $0 == 0x0d || $0 == 0x03 })
+      outputParser = OutputParser()
+      return update
+    }
+
+    guard isReadyForInput, !suspendedUntilSubmit else {
       return LocalEchoUpdate(bytesToDisplay: [])
     }
 
     pendingBytes.append(contentsOf: input)
     return LocalEchoUpdate(bytesToDisplay: underlined(input))
+  }
+
+  mutating func cancelPendingInput() -> LocalEchoUpdate {
+    let rollback = pendingBytes.isEmpty ? [] : rollbackSequence(for: pendingBytes.count)
+    pendingBytes.removeAll(keepingCapacity: true)
+    isReadyForInput = false
+    return LocalEchoUpdate(bytesToDisplay: rollback)
   }
 
   mutating func processOutput(_ bytes: ArraySlice<UInt8>) -> LocalEchoUpdate {
@@ -64,9 +79,10 @@ struct LocalEchoPredictor {
     }
 
     bytesToDisplay.append(contentsOf: received)
-    outputParser.consume(received)
+    // Include confirmed bytes so a stale prompt cannot re-arm prediction.
+    outputParser.consume(Array(bytes))
 
-    if pendingBytes.isEmpty, outputParser.endsAtShellPrompt {
+    if !suspendedUntilSubmit, pendingBytes.isEmpty, outputParser.endsAtShellPrompt {
       isReadyForInput = true
     }
 
