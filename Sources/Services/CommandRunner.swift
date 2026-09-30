@@ -27,15 +27,36 @@ struct ProcessRunner: CommandRunning, Sendable {
     }
 
     try process.run()
-    process.waitUntilExit()
 
+    // Drain both pipes before waiting: a child that fills the pipe buffer
+    // (~64KB, e.g. a large `tsh ls` JSON) blocks until someone reads it.
+    let stderrReader = PipeReader(stderrPipe.fileHandleForReading)
     let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+    let stderrData = stderrReader.wait()
+    process.waitUntilExit()
 
     return CommandResult(
       stdout: String(decoding: stdoutData, as: UTF8.self),
       stderr: String(decoding: stderrData, as: UTF8.self),
       exitStatus: process.terminationStatus
     )
+  }
+}
+
+private final class PipeReader: @unchecked Sendable {
+  private let group = DispatchGroup()
+  private var data = Data()
+
+  init(_ handle: FileHandle) {
+    group.enter()
+    DispatchQueue.global(qos: .utility).async {
+      self.data = handle.readDataToEndOfFile()
+      self.group.leave()
+    }
+  }
+
+  func wait() -> Data {
+    group.wait()
+    return data
   }
 }
