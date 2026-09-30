@@ -6,7 +6,9 @@ struct TeleportLoginSheet: View {
   @Environment(\.dismiss) private var dismiss
   @Bindable var store: TeleportNodeStore
   @Bindable var settings: SettingsStore
-  @State private var terminalStore: TerminalSessionStore
+  // Created in onAppear: SwiftUI re-runs init on every parent update, and
+  // building the store eagerly would spawn a new `tsh login` each time.
+  @State private var terminalStore: TerminalSessionStore?
   @State private var phase: Phase = .running
   @State private var focusToken = 0
 
@@ -15,20 +17,6 @@ struct TeleportLoginSheet: View {
     case verifying
     case failed(Int32?)
     case noSession
-  }
-
-  init(store: TeleportNodeStore, settings: SettingsStore) {
-    self.store = store
-    self.settings = settings
-    _terminalStore = State(
-      initialValue: TerminalSessionStore(
-        windowState: DesktopWindowState.command(
-          store.loginCommand(using: settings),
-          title: "Teleport Login",
-          summary: "Running tsh login"
-        )
-      )
-    )
   }
 
   var body: some View {
@@ -50,12 +38,19 @@ struct TeleportLoginSheet: View {
         }
       }
 
-      EmbeddedTerminalView(
-        sessionStore: terminalStore,
-        focusToken: focusToken,
-        scrollbackLines: settings.terminalScrollbackLines,
-        localEchoEnabled: false
-      )
+      Group {
+        if let terminalStore {
+          EmbeddedTerminalView(
+            sessionStore: terminalStore,
+            focusToken: focusToken,
+            scrollbackLines: settings.terminalScrollbackLines,
+            localEchoEnabled: false
+          )
+        } else {
+          Color.clear
+        }
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
       .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
       .overlay(
         RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -82,13 +77,25 @@ struct TeleportLoginSheet: View {
     .padding(20)
     .frame(width: 720, height: 460)
     .onAppear {
+      guard terminalStore == nil else {
+        return
+      }
+
+      let terminalStore = TerminalSessionStore(
+        windowState: DesktopWindowState.command(
+          store.loginCommand(using: settings),
+          title: "Teleport Login",
+          summary: "Running tsh login"
+        )
+      )
       terminalStore.terminalController.onProcessTerminated = { exitCode in
         processTerminated(exitCode: exitCode)
       }
+      self.terminalStore = terminalStore
       focusToken += 1
     }
     .onDisappear {
-      terminalStore.terminalController.terminate()
+      terminalStore?.terminalController.terminate()
     }
     .onChange(of: store.session.isActive) { _, isActive in
       if isActive {
@@ -130,7 +137,7 @@ struct TeleportLoginSheet: View {
   }
 
   private func processTerminated(exitCode: Int32?) {
-    terminalStore.processTerminated(exitCode: exitCode)
+    terminalStore?.processTerminated(exitCode: exitCode)
 
     guard exitCode == 0 else {
       phase = .failed(exitCode)
@@ -152,7 +159,7 @@ struct TeleportLoginSheet: View {
 
   private func retry() {
     phase = .running
-    terminalStore.run(
+    terminalStore?.run(
       request: .command(
         store.loginCommand(using: settings),
         title: "Teleport Login",
