@@ -30,6 +30,8 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
   let hostView = TerminalHostView()
   var onProcessTerminated: (@MainActor (Int32?) -> Void)?
   var onProcessOutput: (@MainActor () -> Void)?
+  /// Receives every chunk of process output, decoded as UTF-8.
+  var onOutputText: (@MainActor (String) -> Void)?
   private var lastRequestID: UUID?
   private var didReportInitialOutput = false
   private var localEchoPreference = false
@@ -50,6 +52,14 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
     ) { [weak self] in
       self?.handleInitialOutput()
     }
+    hostView.terminalView?.onOutput = { [weak self] slice in
+      self?.handleOutput(slice)
+    }
+  }
+
+  /// Writes text to the running process as if the user had typed it.
+  func sendInput(_ text: String) {
+    hostView.terminalView?.send(txt: text)
   }
 
   func terminate() {
@@ -85,9 +95,28 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
 
   func processTerminated(source: TerminalView, exitCode: Int32?) {
     let onProcessTerminated = onProcessTerminated
+    let exitCode = exitCode.map(Self.exitStatus(fromWaitStatus:))
 
     Task { @MainActor in
       onProcessTerminated?(exitCode)
+    }
+  }
+
+  /// SwiftTerm reports the raw `waitpid` status; decode it like the shell's `$?`.
+  nonisolated static func exitStatus(fromWaitStatus status: Int32) -> Int32 {
+    let signal = status & 0x7f
+    return signal == 0 ? (status >> 8) & 0xff : 128 + signal
+  }
+
+  private func handleOutput(_ slice: ArraySlice<UInt8>) {
+    guard let onOutputText else {
+      return
+    }
+
+    let text = String(decoding: slice, as: UTF8.self)
+
+    Task { @MainActor in
+      onOutputText(text)
     }
   }
 
@@ -143,6 +172,7 @@ final class TerminalContainerView: NSView {
 
 final class ObservedLocalProcessTerminalView: LocalProcessTerminalView {
   var onFirstOutput: (() -> Void)?
+  var onOutput: ((ArraySlice<UInt8>) -> Void)?
   private var didReceiveOutput = false
   private var localEchoEnabled = false
   private var localEchoPredictor = LocalEchoPredictor()
@@ -177,6 +207,8 @@ final class ObservedLocalProcessTerminalView: LocalProcessTerminalView {
     } else {
       super.dataReceived(slice: slice)
     }
+
+    onOutput?(slice)
 
     guard !didReceiveOutput, !slice.isEmpty else {
       return

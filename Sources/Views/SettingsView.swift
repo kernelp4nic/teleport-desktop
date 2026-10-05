@@ -37,6 +37,7 @@ struct SettingsView: View {
   @Bindable var store: TeleportNodeStore
   @Bindable var library: NodeLibraryStore
   @State private var section: SettingsSection = .general
+  @State private var onePasswordAccounts: [OnePasswordAccount] = []
 
   var body: some View {
     HStack(spacing: 0) {
@@ -110,6 +111,51 @@ struct SettingsView: View {
             .labelsHidden()
             .frame(width: 240)
         }
+      }
+      card {
+        Text("1Password")
+          .font(.headline)
+        toggle(
+          "Fill login from 1Password",
+          "Answers the tsh login password and OTP prompts using the 1Password CLI (op). Enable \"Integrate with 1Password CLI\" in 1Password's Developer settings to unlock with Touch ID.",
+          $settings.onePasswordEnabled
+        )
+        Divider()
+        row("Account", "Used when the 1Password CLI is signed in to more than one account.") {
+          Picker("Account", selection: $settings.onePasswordAccount) {
+            Text("Default").tag("")
+            ForEach(onePasswordAccounts) { account in
+              Text(account.displayName).tag(account.id)
+            }
+            if !settings.onePasswordAccount.isEmpty,
+               !onePasswordAccounts.contains(where: { $0.id == settings.onePasswordAccount }) {
+              Text(settings.onePasswordAccount).tag(settings.onePasswordAccount)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+          .frame(width: 240)
+        }
+        .disabled(!settings.onePasswordEnabled)
+        .task {
+          onePasswordAccounts = await Task.detached {
+            (try? OnePasswordService().listAccounts()) ?? []
+          }.value
+        }
+        Divider()
+        row("Item", "Name or ID of the login item. Its username is used when Teleport user is empty.") {
+          TextField("Item", text: $settings.onePasswordItem, prompt: Text("Teleport"))
+            .labelsHidden()
+            .frame(width: 240)
+        }
+        .disabled(!settings.onePasswordEnabled)
+        Divider()
+        row("Vault", "Optional. Leave empty to search all vaults.") {
+          TextField("Vault", text: $settings.onePasswordVault, prompt: Text("Private"))
+            .labelsHidden()
+            .frame(width: 240)
+        }
+        .disabled(!settings.onePasswordEnabled)
       }
       card {
         Text("Session")

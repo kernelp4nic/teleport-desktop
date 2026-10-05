@@ -140,4 +140,10 @@ struct TerminalSessionStoreTests {
 
     #expect(callbackCount == 1)
   }
+
+  @Test func decodesWaitStatusLikeTheShell() {
+    #expect(TerminalProcessController.exitStatus(fromWaitStatus: 0) == 0)
+    #expect(TerminalProcessController.exitStatus(fromWaitStatus: 256) == 1)
+    #expect(TerminalProcessController.exitStatus(fromWaitStatus: 9) == 137)
+  }
 }

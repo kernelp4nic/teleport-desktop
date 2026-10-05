@@ -18,6 +18,10 @@ final class SettingsStore {
     static let soundFeedbackEnabled = "soundFeedbackEnabled"
     static let soundFeedbackVolume = "soundFeedbackVolume"
     static let showsRecentServers = "showsRecentServers"
+    static let onePasswordEnabled = "onePasswordEnabled"
+    static let onePasswordItem = "onePasswordItem"
+    static let onePasswordVault = "onePasswordVault"
+    static let onePasswordAccount = "onePasswordAccount"
   }
 
   @ObservationIgnored private let defaults: UserDefaults
@@ -79,6 +83,31 @@ final class SettingsStore {
     }
   }
 
+  var onePasswordEnabled: Bool {
+    didSet {
+      defaults.set(onePasswordEnabled, forKey: Keys.onePasswordEnabled)
+    }
+  }
+
+  var onePasswordItem: String {
+    didSet {
+      defaults.set(onePasswordItem, forKey: Keys.onePasswordItem)
+    }
+  }
+
+  var onePasswordVault: String {
+    didSet {
+      defaults.set(onePasswordVault, forKey: Keys.onePasswordVault)
+    }
+  }
+
+  /// 1Password account UUID; empty uses the CLI's default account.
+  var onePasswordAccount: String {
+    didSet {
+      defaults.set(onePasswordAccount, forKey: Keys.onePasswordAccount)
+    }
+  }
+
   var soundFeedbackEnabled: Bool {
     didSet {
       defaults.set(soundFeedbackEnabled, forKey: Keys.soundFeedbackEnabled)
@@ -112,6 +141,10 @@ final class SettingsStore {
     showsRecentServers = defaults.object(forKey: Keys.showsRecentServers) == nil
       ? true
       : defaults.bool(forKey: Keys.showsRecentServers)
+    onePasswordEnabled = defaults.bool(forKey: Keys.onePasswordEnabled)
+    onePasswordItem = defaults.string(forKey: Keys.onePasswordItem) ?? ""
+    onePasswordVault = defaults.string(forKey: Keys.onePasswordVault) ?? ""
+    onePasswordAccount = defaults.string(forKey: Keys.onePasswordAccount) ?? ""
     soundFeedbackEnabled = defaults.object(forKey: Keys.soundFeedbackEnabled) == nil
       ? true
       : defaults.bool(forKey: Keys.soundFeedbackEnabled)
@@ -138,6 +171,19 @@ final class SettingsStore {
 
   var normalizedFallbackLogin: String? {
     Self.normalizedValue(fallbackLogin)
+  }
+
+  /// The 1Password item to fill `tsh login` from, when autofill is enabled.
+  var onePasswordLoginItem: String? {
+    onePasswordEnabled ? Self.normalizedValue(onePasswordItem) : nil
+  }
+
+  var normalizedOnePasswordVault: String? {
+    Self.normalizedValue(onePasswordVault)
+  }
+
+  var normalizedOnePasswordAccount: String? {
+    Self.normalizedValue(onePasswordAccount)
   }
 
   var selectedTerminalApplication: TerminalApplication {

@@ -75,6 +75,21 @@ struct SettingsStoreTests {
     #expect(!SettingsStore(defaults: defaults).showsRecentServers)
   }
 
+  @Test func onePasswordItemRequiresAutofillToBeEnabled() {
+    let defaults = makeDefaults()
+    let settings = SettingsStore(defaults: defaults)
+
+    settings.onePasswordItem = "  Teleport  "
+    settings.onePasswordVault = "Work"
+    #expect(settings.onePasswordLoginItem == nil)
+
+    settings.onePasswordEnabled = true
+    let restoredSettings = SettingsStore(defaults: defaults)
+
+    #expect(restoredSettings.onePasswordLoginItem == "Teleport")
+    #expect(restoredSettings.normalizedOnePasswordVault == "Work")
+  }
+
   @Test func soundFeedbackVolumeIsClamped() {
     let settings = SettingsStore(defaults: makeDefaults())
 

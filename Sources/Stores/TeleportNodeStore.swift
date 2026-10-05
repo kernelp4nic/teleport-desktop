@@ -157,10 +157,12 @@ final class TeleportNodeStore {
     )
   }
 
-  func loginCommand(using settings: SettingsStore) -> String {
+  /// `fallbackUser` is used when no Teleport user is configured, e.g. the
+  /// username stored in 1Password.
+  func loginCommand(using settings: SettingsStore, fallbackUser: String? = nil) -> String {
     teleportService.loginCommand(
       proxy: session.proxy ?? settings.normalizedProxyAddress,
-      user: settings.normalizedTeleportUser
+      user: settings.normalizedTeleportUser ?? fallbackUser
     )
   }
 
