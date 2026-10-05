@@ -23,6 +23,9 @@ struct DesktopRootView: View {
   @State private var remoteFilePath = "~/"
   @State private var renamedNodeID: String?
   @State private var renamedNodeName = ""
+  @State private var editedGroupIconGroup: String?
+  @State private var editedGroupIcon = ""
+  @State private var hoveredHeaderGroup: String?
   @State private var uploadURLs: [URL] = []
   @State private var terminalFocusToken = 0
   @State private var tabStore = DesktopTabStore()
@@ -157,6 +160,19 @@ struct DesktopRootView: View {
     } message: {
       Text("Leave the name empty to restore the original hostname.")
     }
+    .alert("Group Icon", isPresented: groupIconAlertIsPresented) {
+      TextField("Emoji or SF Symbol", text: $editedGroupIcon)
+
+      Button("Cancel", role: .cancel) {
+        editedGroupIconGroup = nil
+      }
+
+      Button("Save") {
+        applyGroupIconEdit()
+      }
+    } message: {
+      Text("Enter an emoji (e.g. 🇺🇸) or an SF Symbol name (e.g. globe.americas). Press ⌃⌘Space for the emoji picker. Leave empty to remove the icon.")
+    }
   }
 
   @ViewBuilder
@@ -167,6 +183,7 @@ struct DesktopRootView: View {
           ForEach(tabStore.tabs) { tab in
             DesktopTabPillView(
               title: tab.terminalStore.currentTitle,
+              icon: groupIcon(forNodeID: tab.terminalStore.connectedNodeID ?? tab.selectedNodeID),
               isSelected: tab.id == tabStore.selectedTabID,
               onSelect: {
                 tabStore.selectTab(id: tab.id)
@@ -203,7 +220,8 @@ struct DesktopRootView: View {
               Text("All \(groupingKey)").tag(Self.allGroups)
 
               ForEach(groupValues, id: \.self) { value in
-                Text(value).tag(value)
+                GroupTitleView(title: value, icon: library.groupIcon(for: value, scopeKey: libraryScopeKey))
+                  .tag(value)
               }
             }
             .pickerStyle(.menu)
@@ -258,6 +276,7 @@ struct DesktopRootView: View {
                     node: node,
                     name: library.name(for: node, scopeKey: libraryScopeKey),
                     groupingKey: settings.normalizedGroupingLabelKey,
+                    groupIcon: groupIcon(for: node),
                     resolvedLogin: resolvedLogin(for: node),
                     isFavorite: library.isFavorite(nodeID: node.id, scopeKey: libraryScopeKey),
                     onToggleFavorite: {
@@ -267,18 +286,31 @@ struct DesktopRootView: View {
                   .tag(rowID(sectionID: section.id, nodeID: node.id))
                   .contentShape(Rectangle())
                   .listRowInsets(
-                    EdgeInsets(top: 4, leading: 26, bottom: 4, trailing: 10)
+                    EdgeInsets(top: 6, leading: 26, bottom: 6, trailing: 10)
                   )
                 }
               } header: {
-                Text(section.title)
+                GroupTitleView(
+                  title: section.title,
+                  icon: section.groupValue.flatMap { library.groupIcon(for: $0, scopeKey: libraryScopeKey) }
+                )
                   .textCase(nil)
-                  .font(.subheadline.weight(.semibold))
-                  .foregroundStyle(.secondary)
+                  .font(.system(size: 15, weight: .bold))
+                  .foregroundStyle(.primary)
+                  .padding(.top, 8)
+                  .padding(.bottom, 2)
                   .frame(maxWidth: .infinity, alignment: .leading)
                   .contentShape(Rectangle())
                   .onTapGesture {
                     toggleSection(section.id)
+                  }
+                  .onHover { isHovering in
+                    // The list-level context menu swallows header right-clicks, so it reads this to target the group.
+                    if isHovering {
+                      hoveredHeaderGroup = section.groupValue
+                    } else if hoveredHeaderGroup == section.groupValue {
+                      hoveredHeaderGroup = nil
+                    }
                   }
                   .padding(.leading, 6)
               }
@@ -286,22 +318,46 @@ struct DesktopRootView: View {
           }
           .listStyle(.sidebar)
           .contextMenu(forSelectionType: String.self) { selectedIDs in
-            Button("Rename") {
-              prepareNodeRename(selectedIDs)
-            }
-            .disabled(node(forSelection: selectedIDs) == nil)
+            if let section = contextMenuGroupSection(forSelection: selectedIDs),
+               let group = section.groupValue {
+              Button("Set Icon…") {
+                prepareGroupIconEdit(group)
+              }
 
-            Divider()
+              if library.groupIcon(for: group, scopeKey: libraryScopeKey) != nil {
+                Button("Remove Icon") {
+                  library.setGroupIcon("", for: group, scopeKey: libraryScopeKey)
+                }
+              }
 
-            Button("Connect in App") {
-              connectSelectionToNewTab(selectedIDs)
-            }
-            .disabled(!canConnectSelection(selectedIDs))
+              Divider()
 
-            Button("Open Externally") {
-              openSelectionExternally(selectedIDs)
+              Button("Connect All in App (\(connectableNodes(in: section).count))") {
+                connectableNodes(in: section).forEach { openNodeInApp(node: $0) }
+              }
+              .disabled(connectableNodes(in: section).isEmpty)
+
+              Button("Open All Externally (\(connectableNodes(in: section).count))") {
+                connectableNodes(in: section).forEach { openNodeExternally($0) }
+              }
+              .disabled(connectableNodes(in: section).isEmpty)
+            } else if node(forSelection: selectedIDs) != nil {
+              Button("Rename") {
+                prepareNodeRename(selectedIDs)
+              }
+
+              Divider()
+
+              Button("Connect in App") {
+                connectSelectionToNewTab(selectedIDs)
+              }
+              .disabled(!canConnectSelection(selectedIDs))
+
+              Button("Open Externally") {
+                openSelectionExternally(selectedIDs)
+              }
+              .disabled(!canConnectSelection(selectedIDs))
             }
-            .disabled(!canConnectSelection(selectedIDs))
           } primaryAction: { selectedIDs in
             connectSelectionToNewTab(selectedIDs)
           }
@@ -334,7 +390,13 @@ struct DesktopRootView: View {
       VStack(alignment: .leading, spacing: 8) {
         HStack(alignment: .top, spacing: 16) {
           VStack(alignment: .leading, spacing: 4) {
-            Text(detailTitle)
+            HStack(spacing: 8) {
+              if let icon = detailNode.flatMap({ groupIcon(for: $0) }) {
+                GroupIconView(icon: icon)
+              }
+
+              Text(detailTitle)
+            }
               .font(.title2.weight(.semibold))
 
             Text(detailSubtitle)
@@ -546,6 +608,10 @@ struct DesktopRootView: View {
   }
 
   private var recentNodes: [TeleportNode] {
+    guard settings.showsRecentServers else {
+      return []
+    }
+
     let nodesByID = Dictionary(uniqueKeysWithValues: filteredNodes.map { ($0.id, $0) })
     let favoriteNodeIDs = Set(favoriteNodes.map(\.id))
 
@@ -592,7 +658,12 @@ struct DesktopRootView: View {
           lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
         }
         .map { key in
-          DesktopServerSection(id: "group:\(key)", title: key, nodes: grouped[key, default: []])
+          DesktopServerSection(
+            id: "group:\(key)",
+            title: key,
+            nodes: grouped[key, default: []],
+            groupValue: key
+          )
         }
     )
 
@@ -717,6 +788,22 @@ struct DesktopRootView: View {
     return "Open in \(terminalApplication.displayName)"
   }
 
+  private func groupIcon(for node: TeleportNode) -> String? {
+    guard let groupingKey = settings.normalizedGroupingLabelKey else {
+      return nil
+    }
+
+    return library.groupIcon(for: node.groupValue(for: groupingKey), scopeKey: libraryScopeKey)
+  }
+
+  private func groupIcon(forNodeID nodeID: String?) -> String? {
+    guard let nodeID, let node = store.nodes.first(where: { $0.id == nodeID }) else {
+      return nil
+    }
+
+    return groupIcon(for: node)
+  }
+
   private func resolvedLogin(for node: TeleportNode) -> String? {
     node.preferredLogin(
       labelKey: settings.normalizedLoginLabelKey,
@@ -796,6 +883,22 @@ struct DesktopRootView: View {
     return filteredNodes.first { $0.id == nodeID }
   }
 
+  /// Right-clicking a section header reports the section ID (or nothing) instead of a row ID,
+  /// so fall back to the header under the pointer.
+  private func contextMenuGroupSection(forSelection selectedIDs: Set<String>) -> DesktopServerSection? {
+    guard node(forSelection: selectedIDs) == nil else {
+      return nil
+    }
+
+    let groupSections = sections.filter { $0.groupValue != nil }
+    return groupSections.first { selectedIDs.contains($0.id) }
+      ?? groupSections.first { $0.groupValue == hoveredHeaderGroup }
+  }
+
+  private func connectableNodes(in section: DesktopServerSection) -> [TeleportNode] {
+    section.nodes.filter { resolvedLogin(for: $0) != nil }
+  }
+
   private func openNodeExternally(_ node: TeleportNode) {
     store.connect(to: node, settings: settings)
   }
@@ -832,6 +935,31 @@ struct DesktopRootView: View {
         }
       }
     )
+  }
+
+  private var groupIconAlertIsPresented: Binding<Bool> {
+    Binding(
+      get: { editedGroupIconGroup != nil },
+      set: { isPresented in
+        if !isPresented {
+          editedGroupIconGroup = nil
+        }
+      }
+    )
+  }
+
+  private func prepareGroupIconEdit(_ group: String) {
+    editedGroupIconGroup = group
+    editedGroupIcon = library.groupIcon(for: group, scopeKey: libraryScopeKey) ?? ""
+  }
+
+  private func applyGroupIconEdit() {
+    guard let editedGroupIconGroup else {
+      return
+    }
+
+    library.setGroupIcon(editedGroupIcon, for: editedGroupIconGroup, scopeKey: libraryScopeKey)
+    self.editedGroupIconGroup = nil
   }
 
   private func prepareNodeRename(_ selectedIDs: Set<String>) {
@@ -1231,6 +1359,7 @@ private struct DesktopServerSection: Identifiable {
   let id: String
   let title: String
   let nodes: [TeleportNode]
+  var groupValue: String? = nil
 }
 
 private struct ConnectionStatusBadge: View {
@@ -1279,6 +1408,7 @@ private struct ConnectionStatusBadge: View {
 
 private struct DesktopTabPillView: View {
   let title: String
+  let icon: String?
   let isSelected: Bool
   let onSelect: () -> Void
   let onClose: () -> Void
@@ -1287,7 +1417,13 @@ private struct DesktopTabPillView: View {
     HStack(spacing: 6) {
       Button(action: onSelect) {
         HStack(spacing: 8) {
-          Image(systemName: "terminal")
+          Group {
+            if let icon {
+              GroupIconView(icon: icon)
+            } else {
+              Image(systemName: "terminal")
+            }
+          }
             .font(.caption)
             .foregroundStyle(isSelected ? .primary : .secondary)
 

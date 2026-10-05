@@ -64,6 +64,17 @@ struct SettingsStoreTests {
     #expect(restoredSettings.soundFeedbackVolume == 0.25)
   }
 
+  @Test func recentServersAreShownByDefaultAndPersisted() {
+    let defaults = makeDefaults()
+    let settings = SettingsStore(defaults: defaults)
+
+    #expect(settings.showsRecentServers)
+
+    settings.showsRecentServers = false
+
+    #expect(!SettingsStore(defaults: defaults).showsRecentServers)
+  }
+
   @Test func soundFeedbackVolumeIsClamped() {
     let settings = SettingsStore(defaults: makeDefaults())
 

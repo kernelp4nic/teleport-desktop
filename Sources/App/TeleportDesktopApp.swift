@@ -40,7 +40,7 @@ struct TeleportDesktopApp: App {
     .menuBarExtraStyle(.window)
 
     Settings {
-      SettingsView(settings: settingsStore, store: nodeStore)
+      SettingsView(settings: settingsStore, store: nodeStore, library: libraryStore)
     }
   }
 }

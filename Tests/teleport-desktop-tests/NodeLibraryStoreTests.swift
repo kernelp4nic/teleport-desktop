@@ -96,6 +96,31 @@ struct NodeLibraryStoreTests {
     #expect(store.name(for: node, scopeKey: "proxy-a") == "original-hostname")
   }
 
+  @Test func groupIconPersistsAndIsScoped() {
+    let (suiteName, defaults) = makeDefaults()
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    let store = NodeLibraryStore(defaults: defaults)
+    store.setGroupIcon(" 🇺🇸 ", for: "usa", scopeKey: "proxy-a")
+
+    let reloadedStore = NodeLibraryStore(defaults: defaults)
+
+    #expect(reloadedStore.groupIcon(for: "usa", scopeKey: "proxy-a") == "🇺🇸")
+    #expect(reloadedStore.groupIcon(for: "usa", scopeKey: "proxy-b") == nil)
+  }
+
+  @Test func blankGroupIconRemovesIcon() {
+    let (suiteName, defaults) = makeDefaults()
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    let store = NodeLibraryStore(defaults: defaults)
+    store.setGroupIcon("🇺🇸", for: "usa", scopeKey: "proxy-a")
+    store.setGroupIcon("  ", for: "usa", scopeKey: "proxy-a")
+
+    #expect(store.groupIcon(for: "usa", scopeKey: "proxy-a") == nil)
+    #expect(store.groupIconsByScope.isEmpty)
+  }
+
   private func makeDefaults() -> (String, UserDefaults) {
     let suiteName = "NodeLibraryStoreTests.\(UUID().uuidString)"
     return (suiteName, UserDefaults(suiteName: suiteName)!)

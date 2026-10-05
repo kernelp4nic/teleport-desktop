@@ -7,6 +7,7 @@ struct ServerRowView: View {
   let loginKey: String?
   let isFavorite: Bool
   let resolvedLogin: String?
+  var groupIcon: String? = nil
   let onToggleFavorite: () -> Void
   let onConnect: () -> Void
 
@@ -14,6 +15,11 @@ struct ServerRowView: View {
     HStack(alignment: .top, spacing: 12) {
       VStack(alignment: .leading, spacing: 8) {
         HStack(spacing: 8) {
+          if let groupIcon {
+            GroupIconView(icon: groupIcon)
+              .font(.headline)
+          }
+
           Text(name)
             .font(.headline)
             .lineLimit(1)

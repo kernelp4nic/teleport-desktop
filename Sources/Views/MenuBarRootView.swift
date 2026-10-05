@@ -87,7 +87,8 @@ struct MenuBarRootView: View {
             Text("All \(groupingKey)").tag(Self.allGroups)
 
             ForEach(groupValues, id: \.self) { value in
-              Text(value).tag(value)
+              GroupTitleView(title: value, icon: library.groupIcon(for: value, scopeKey: libraryScopeKey))
+                .tag(value)
             }
           }
           .pickerStyle(.menu)
@@ -131,7 +132,10 @@ struct MenuBarRootView: View {
             VStack(alignment: .leading, spacing: 8) {
               if shouldShowSectionHeaders {
                 HStack {
-                  Text(section.title)
+                  GroupTitleView(
+                    title: section.title,
+                    icon: section.groupValue.flatMap { library.groupIcon(for: $0, scopeKey: libraryScopeKey) }
+                  )
                     .font(.subheadline.weight(.semibold))
                   Spacer()
                   Text("\(section.nodes.count)")
@@ -152,6 +156,7 @@ struct MenuBarRootView: View {
                     fallback: settings.normalizedFallbackLogin,
                     allowedLogins: store.session.logins
                   ),
+                  groupIcon: groupIcon(for: node),
                   onToggleFavorite: {
                     toggleFavorite(for: node)
                   },
@@ -279,6 +284,10 @@ struct MenuBarRootView: View {
   }
 
   private var recentNodes: [TeleportNode] {
+    guard settings.showsRecentServers else {
+      return []
+    }
+
     let nodesByID = Dictionary(uniqueKeysWithValues: filteredNodes.map { ($0.id, $0) })
     let favoriteNodeIDs = Set(favoriteNodes.map(\.id))
 
@@ -322,7 +331,8 @@ struct MenuBarRootView: View {
           ServerSection(
             id: "group:\(key)",
             title: key,
-            nodes: grouped[key, default: []]
+            nodes: grouped[key, default: []],
+            groupValue: key
           )
         }
     )
@@ -332,6 +342,14 @@ struct MenuBarRootView: View {
 
   private var shouldShowSectionHeaders: Bool {
     sections.count > 1 || !favoriteNodes.isEmpty || !recentNodes.isEmpty
+  }
+
+  private func groupIcon(for node: TeleportNode) -> String? {
+    guard let groupingKey = settings.normalizedGroupingLabelKey else {
+      return nil
+    }
+
+    return library.groupIcon(for: node.groupValue(for: groupingKey), scopeKey: libraryScopeKey)
   }
 
   private func toggleFavorite(for node: TeleportNode) {
@@ -344,4 +362,5 @@ private struct ServerSection: Identifiable {
   let id: String
   let title: String
   let nodes: [TeleportNode]
+  var groupValue: String? = nil
 }

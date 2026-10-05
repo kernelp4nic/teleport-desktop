@@ -35,6 +35,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 struct SettingsView: View {
   @Bindable var settings: SettingsStore
   @Bindable var store: TeleportNodeStore
+  @Bindable var library: NodeLibraryStore
   @State private var section: SettingsSection = .general
 
   var body: some View {
@@ -139,6 +140,42 @@ struct SettingsView: View {
           TextField("Fallback login", text: $settings.fallbackLogin, prompt: Text("ubuntu"))
             .labelsHidden()
             .frame(width: 180)
+        }
+      }
+      card {
+        Text("Sidebar")
+          .font(.headline)
+        toggle(
+          "Show recent servers",
+          "Lists the servers you connected to most recently above the groups.",
+          $settings.showsRecentServers
+        )
+      }
+      if let groupingKey = settings.normalizedGroupingLabelKey {
+        card {
+          Text("Group Icons")
+            .font(.headline)
+          Text("Shown before each \(groupingKey) group in the sidebar. Enter an emoji (press ⌃⌘Space for the picker) or an SF Symbol name such as globe.americas.")
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+
+          if groupValues.isEmpty {
+            Text("No groups loaded yet.")
+              .font(.system(size: 12))
+              .foregroundStyle(.secondary)
+          } else {
+            ForEach(groupValues, id: \.self) { group in
+              Divider()
+              HStack(spacing: 12) {
+                Text(group)
+                  .font(.system(size: 13, weight: .medium))
+                Spacer()
+                TextField("Icon", text: groupIconBinding(for: group), prompt: Text(""))
+                  .labelsHidden()
+                  .frame(width: 180)
+              }
+            }
+          }
         }
       }
       card {
@@ -266,6 +303,26 @@ struct SettingsView: View {
 
   private func bundleValue(_ key: String) -> String? {
     Bundle.main.object(forInfoDictionaryKey: key) as? String
+  }
+
+  private var libraryScopeKey: String {
+    library.scopeKey(session: store.session, settings: settings)
+  }
+
+  private var groupValues: [String] {
+    guard let groupingKey = settings.normalizedGroupingLabelKey else {
+      return []
+    }
+
+    return Array(Set(store.nodes.map { $0.groupValue(for: groupingKey) }))
+      .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+  }
+
+  private func groupIconBinding(for group: String) -> Binding<String> {
+    Binding(
+      get: { library.groupIcon(for: group, scopeKey: libraryScopeKey) ?? "" },
+      set: { library.setGroupIcon($0, for: group, scopeKey: libraryScopeKey) }
+    )
   }
 
   private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {

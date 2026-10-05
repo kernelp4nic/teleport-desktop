@@ -7,6 +7,7 @@ final class NodeLibraryStore {
     static let favoritesByScope = "favoritesByScope"
     static let recentsByScope = "recentsByScope"
     static let nodeNamesByScope = "nodeNamesByScope"
+    static let groupIconsByScope = "groupIconsByScope"
   }
 
   @ObservationIgnored private let defaults: UserDefaults
@@ -31,6 +32,12 @@ final class NodeLibraryStore {
     }
   }
 
+  var groupIconsByScope: [String: [String: String]] {
+    didSet {
+      persistGroupIcons()
+    }
+  }
+
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
     favoritesByScope = Self.loadValue(
@@ -47,6 +54,12 @@ final class NodeLibraryStore {
     )
     nodeNamesByScope = Self.loadValue(
       forKey: Keys.nodeNamesByScope,
+      defaults: defaults,
+      decoder: decoder,
+      fallback: [:]
+    )
+    groupIconsByScope = Self.loadValue(
+      forKey: Keys.groupIconsByScope,
       defaults: defaults,
       decoder: decoder,
       fallback: [:]
@@ -128,6 +141,24 @@ final class NodeLibraryStore {
     }
   }
 
+  func groupIcon(for group: String, scopeKey: String) -> String? {
+    groupIconsByScope[scopeKey]?[group]
+  }
+
+  func setGroupIcon(_ icon: String, for group: String, scopeKey: String) {
+    let trimmedIcon = icon.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if trimmedIcon.isEmpty {
+      groupIconsByScope[scopeKey]?.removeValue(forKey: group)
+
+      if groupIconsByScope[scopeKey]?.isEmpty == true {
+        groupIconsByScope.removeValue(forKey: scopeKey)
+      }
+    } else {
+      groupIconsByScope[scopeKey, default: [:]][group] = trimmedIcon
+    }
+  }
+
   private static func loadValue<T: Decodable>(
     forKey key: String,
     defaults: UserDefaults,
@@ -152,6 +183,10 @@ final class NodeLibraryStore {
 
   private func persistNodeNames() {
     persist(nodeNamesByScope, forKey: Keys.nodeNamesByScope)
+  }
+
+  private func persistGroupIcons() {
+    persist(groupIconsByScope, forKey: Keys.groupIconsByScope)
   }
 
   private func persist<T: Encodable>(_ value: T, forKey key: String) {

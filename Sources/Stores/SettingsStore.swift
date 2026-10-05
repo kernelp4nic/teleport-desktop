@@ -17,6 +17,7 @@ final class SettingsStore {
     static let localEchoEnabled = "localEchoEnabled"
     static let soundFeedbackEnabled = "soundFeedbackEnabled"
     static let soundFeedbackVolume = "soundFeedbackVolume"
+    static let showsRecentServers = "showsRecentServers"
   }
 
   @ObservationIgnored private let defaults: UserDefaults
@@ -72,6 +73,12 @@ final class SettingsStore {
     }
   }
 
+  var showsRecentServers: Bool {
+    didSet {
+      defaults.set(showsRecentServers, forKey: Keys.showsRecentServers)
+    }
+  }
+
   var soundFeedbackEnabled: Bool {
     didSet {
       defaults.set(soundFeedbackEnabled, forKey: Keys.soundFeedbackEnabled)
@@ -102,6 +109,9 @@ final class SettingsStore {
       ? Self.defaultTerminalScrollbackLines
       : max(0, defaults.integer(forKey: Keys.terminalScrollbackLines))
     localEchoEnabled = defaults.bool(forKey: Keys.localEchoEnabled)
+    showsRecentServers = defaults.object(forKey: Keys.showsRecentServers) == nil
+      ? true
+      : defaults.bool(forKey: Keys.showsRecentServers)
     soundFeedbackEnabled = defaults.object(forKey: Keys.soundFeedbackEnabled) == nil
       ? true
       : defaults.bool(forKey: Keys.soundFeedbackEnabled)

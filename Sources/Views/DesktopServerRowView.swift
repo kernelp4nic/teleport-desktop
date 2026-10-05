@@ -4,22 +4,32 @@ struct DesktopServerRowView: View {
   let node: TeleportNode
   let name: String
   let groupingKey: String?
+  let groupIcon: String?
   let resolvedLogin: String?
   let isFavorite: Bool
   let onToggleFavorite: () -> Void
 
   var body: some View {
     HStack(spacing: 10) {
-      Image(systemName: "server.rack")
-        .foregroundStyle(.secondary)
-        .frame(width: 16)
+      Group {
+        if let groupIcon {
+          GroupIconView(icon: groupIcon)
+        } else {
+          Image(systemName: "server.rack")
+            .foregroundStyle(.secondary)
+        }
+      }
+      .font(.system(size: 15))
+      .fixedSize()
+      .frame(minWidth: 20)
 
       VStack(alignment: .leading, spacing: 2) {
         Text(name)
+          .font(.system(size: 14, weight: .medium))
           .lineLimit(1)
 
         Text(rowSubtitle)
-          .font(.caption)
+          .font(.system(size: 12))
           .foregroundStyle(.secondary)
           .lineLimit(1)
       }
