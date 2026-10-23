@@ -1,6 +1,7 @@
 import AppKit
 import Observation
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct DesktopRootView: View {
   @Environment(\.openSettings) private var openSettings
@@ -8,6 +9,7 @@ struct DesktopRootView: View {
   @Bindable var store: TeleportNodeStore
   @Bindable var settings: SettingsStore
   @Bindable var library: NodeLibraryStore
+  let shortcuts: ShortcutStore
   @SceneStorage("desktop.searchText") private var searchText = ""
   @SceneStorage("desktop.selectedGroup") private var selectedGroup = Self.allGroups
   @State private var browserSelectedNodeID: String?
@@ -29,6 +31,7 @@ struct DesktopRootView: View {
   @State private var uploadURLs: [URL] = []
   @State private var terminalFocusToken = 0
   @State private var tabStore = DesktopTabStore()
+  @State private var isCommandPalettePresented = false
 
   private static let allGroups = "__all_groups__"
 
@@ -42,12 +45,8 @@ struct DesktopRootView: View {
     .background(
       WindowTabConfigurationView(
         title: "Teleport Desktop",
-        onCloseTab: closeSelectedTabFromShortcut,
-        onSelectPreviousTab: selectPreviousTabFromShortcut,
-        onSelectNextTab: selectNextTabFromShortcut,
-        onShowSearch: showSearchFromShortcut,
-        onFindNext: findNextFromShortcut,
-        onFindPrevious: findPreviousFromShortcut
+        actionForEvent: shortcuts.action(for:),
+        onAction: performShortcut
       )
     )
     .overlay(alignment: .bottomTrailing) {
@@ -57,13 +56,26 @@ struct DesktopRootView: View {
           .transition(.move(edge: .trailing).combined(with: .opacity))
       }
     }
+    .overlay {
+      if isCommandPalettePresented {
+        CommandPaletteView(items: commandPaletteItems, onDismiss: dismissCommandPalette)
+      }
+    }
     .animation(.easeInOut(duration: 0.2), value: fileTransferToastMessage)
+    .preferredColorScheme(settings.interfaceTheme.colorScheme)
     .toolbar {
       ToolbarItem(placement: .principal) {
         toolbarTabStrip
       }
 
       ToolbarItemGroup {
+        Button {
+          toggleCommandPalette()
+        } label: {
+          Label("Command Palette", systemImage: "command")
+        }
+        .help("Command Palette (\(shortcuts.shortcut(for: .commandPalette)?.label ?? "unassigned"))")
+
         Button {
           Task {
             await store.refresh(using: settings, forceRefresh: true)
@@ -185,6 +197,7 @@ struct DesktopRootView: View {
               title: tab.terminalStore.currentTitle,
               icon: groupIcon(forNodeID: tab.terminalStore.connectedNodeID ?? tab.selectedNodeID),
               isSelected: tab.id == tabStore.selectedTabID,
+              size: settings.tabSize,
               onSelect: {
                 tabStore.selectTab(id: tab.id)
               },
@@ -192,12 +205,20 @@ struct DesktopRootView: View {
                 closeTab(tab)
               }
             )
+            .onDrag {
+              NSItemProvider(object: tab.id.uuidString as NSString)
+            }
+            .onDrop(of: [.plainText], isTargeted: nil) { providers in
+              moveDraggedTab(from: providers, onto: tab.id)
+            }
           }
         }
         .padding(.horizontal, 2)
         .padding(.vertical, 1)
       }
-      .scrollIndicators(.hidden)
+      // The visible scroller drew under the pills on macOS; trackpad scrolling still works.
+      .scrollIndicators(.never)
+      .fixedSize(horizontal: false, vertical: true)
     }
   }
 
@@ -232,6 +253,15 @@ struct DesktopRootView: View {
           }
 
           Spacer()
+
+          Button {
+            toggleAllSections()
+          } label: {
+            Image(systemName: areAllSectionsCollapsed ? "rectangle.expand.vertical" : "rectangle.compress.vertical")
+          }
+          .buttonStyle(.borderless)
+          .disabled(sections.isEmpty)
+          .help(areAllSectionsCollapsed ? "Expand All Groups" : "Collapse All Groups")
 
           Text("\(filteredNodes.count) servers")
             .font(.caption)
@@ -487,7 +517,9 @@ struct DesktopRootView: View {
           sessionStore: activeTab.terminalStore,
           focusToken: terminalFocusToken,
           scrollbackLines: settings.terminalScrollbackLines,
-          localEchoEnabled: settings.localEchoEnabled
+          localEchoEnabled: settings.localEchoEnabled,
+          fontFamily: settings.terminalFontFamily,
+          fontSize: settings.terminalFontSize
         )
           .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
           .overlay(
@@ -691,6 +723,23 @@ struct DesktopRootView: View {
         collapsedSectionIDs.remove(sectionID)
       } else {
         collapsedSectionIDs.insert(sectionID)
+      }
+    }
+  }
+
+  private var areAllSectionsCollapsed: Bool {
+    let sectionIDs = sections.map(\.id)
+    return !sectionIDs.isEmpty && sectionIDs.allSatisfy { collapsedSectionIDs.contains($0) }
+  }
+
+  /// Collapses every visible section, or expands them all when they are already collapsed.
+  private func toggleAllSections() {
+    let sectionIDs = Set(sections.map(\.id))
+    withAnimation(.easeInOut(duration: 0.2)) {
+      if areAllSectionsCollapsed {
+        collapsedSectionIDs.subtract(sectionIDs)
+      } else {
+        collapsedSectionIDs.formUnion(sectionIDs)
       }
     }
   }
@@ -1032,21 +1081,122 @@ struct DesktopRootView: View {
     SoundFeedbackService.play(.dismissed, settings: settings)
   }
 
-  private func closeSelectedTabFromShortcut() -> Bool {
-    guard let activeTab else {
+  /// Returns false when the action does not apply right now, so the key falls through to the system.
+  private func performShortcut(_ action: DesktopAction) -> Bool {
+    guard isAvailable(action) else {
       return false
     }
 
-    closeTab(activeTab)
+    switch action {
+    case .commandPalette:
+      toggleCommandPalette()
+    case .refreshServers:
+      Task {
+        await store.refresh(using: settings, forceRefresh: true)
+        reconcileSelection()
+      }
+    case .login:
+      presentLoginSheet()
+    case .collapseGroups:
+      toggleAllSections()
+    case .find:
+      showTerminalSearch()
+    case .findNext:
+      findNextSearchResult()
+    case .findPrevious:
+      findPreviousSearchResult()
+    case .closeTab:
+      if let activeTab {
+        closeTab(activeTab)
+      }
+    case .previousTab:
+      tabStore.selectPreviousTab()
+    case .nextTab:
+      tabStore.selectNextTab()
+    case .moveTabLeft:
+      tabStore.moveSelectedTab(by: -1)
+    case .moveTabRight:
+      tabStore.moveSelectedTab(by: 1)
+    case .uploadFiles:
+      prepareUpload()
+    case .downloadFile:
+      prepareDownload()
+    }
+
     return true
   }
 
-  private func selectPreviousTabFromShortcut() -> Bool {
-    tabStore.selectPreviousTab()
+  private func isAvailable(_ action: DesktopAction) -> Bool {
+    switch action {
+    case .commandPalette, .refreshServers, .login, .collapseGroups:
+      return true
+    case .find, .findNext, .findPrevious, .closeTab, .previousTab, .nextTab, .moveTabLeft, .moveTabRight:
+      return activeTab != nil
+    case .uploadFiles, .downloadFile:
+      return activeConnectionBadgeState == .connected
+    }
   }
 
-  private func selectNextTabFromShortcut() -> Bool {
-    tabStore.selectNextTab()
+  private func moveDraggedTab(from providers: [NSItemProvider], onto targetID: UUID) -> Bool {
+    guard let provider = providers.first else {
+      return false
+    }
+
+    _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+      guard let idString = object as? NSString,
+            let draggedID = UUID(uuidString: idString as String) else {
+        return
+      }
+
+      Task { @MainActor in
+        tabStore.moveTab(id: draggedID, onto: targetID)
+      }
+    }
+    return true
+  }
+
+  private func toggleCommandPalette() {
+    if isCommandPalettePresented {
+      dismissCommandPalette()
+    } else {
+      isCommandPalettePresented = true
+    }
+  }
+
+  private func dismissCommandPalette() {
+    isCommandPalettePresented = false
+    requestTerminalFocus()
+  }
+
+  private var commandPaletteItems: [CommandPaletteItem] {
+    let actionItems = DesktopAction.allCases
+      .filter { $0 != .commandPalette && isAvailable($0) }
+      .map { action in
+        CommandPaletteItem(
+          id: action.rawValue,
+          title: action.title,
+          subtitle: shortcuts.shortcut(for: action)?.label,
+          icon: action.systemImage
+        ) {
+          _ = performShortcut(action)
+        }
+      }
+
+    let hostItems = store.nodes
+      .filter { resolvedLogin(for: $0) != nil }
+      .sorted { library.name(for: $0, scopeKey: libraryScopeKey) < library.name(for: $1, scopeKey: libraryScopeKey) }
+      .map { node in
+        CommandPaletteItem(
+          id: "host-\(node.id)",
+          title: library.name(for: node, scopeKey: libraryScopeKey),
+          subtitle: node.address,
+          icon: groupIcon(for: node) ?? "server.rack"
+        ) {
+          openNodeInApp(node: node)
+        }
+      }
+
+    return actionItems + hostItems
   }
 
   private func requestTerminalFocus() {
@@ -1063,33 +1213,6 @@ struct DesktopRootView: View {
 
   private func findPreviousSearchResult() {
     activeTab?.terminalStore.findPrevious()
-  }
-
-  private func showSearchFromShortcut() -> Bool {
-    guard activeTab != nil else {
-      return false
-    }
-
-    showTerminalSearch()
-    return true
-  }
-
-  private func findNextFromShortcut() -> Bool {
-    guard activeTab != nil else {
-      return false
-    }
-
-    findNextSearchResult()
-    return true
-  }
-
-  private func findPreviousFromShortcut() -> Bool {
-    guard activeTab != nil else {
-      return false
-    }
-
-    findPreviousSearchResult()
-    return true
   }
 
   private func prepareUpload() {
@@ -1410,42 +1533,44 @@ private struct DesktopTabPillView: View {
   let title: String
   let icon: String?
   let isSelected: Bool
+  let size: TabSize
   let onSelect: () -> Void
   let onClose: () -> Void
 
   var body: some View {
     HStack(spacing: 6) {
-      Button(action: onSelect) {
-        HStack(spacing: 8) {
-          Group {
-            if let icon {
-              GroupIconView(icon: icon)
-            } else {
-              Image(systemName: "terminal")
-            }
+      // Taps instead of Buttons: on macOS a Button swallows the mouse drag, so tabs could not be reordered.
+      HStack(spacing: 8) {
+        Group {
+          if let icon {
+            GroupIconView(icon: icon)
+          } else {
+            Image(systemName: "terminal")
           }
-            .font(.caption)
-            .foregroundStyle(isSelected ? .primary : .secondary)
-
-          Text(title)
-            .font(.subheadline.weight(.medium))
-            .lineLimit(1)
-            .foregroundStyle(isSelected ? .primary : .secondary)
         }
-        .padding(.leading, 10)
-        .padding(.vertical, 8)
-      }
-      .buttonStyle(.plain)
+          .font(.caption)
+          .foregroundStyle(isSelected ? .primary : .secondary)
 
-      Button(action: onClose) {
-        Image(systemName: "xmark")
-          .font(.caption2.weight(.bold))
-          .foregroundStyle(.secondary)
-          .padding(6)
-          .contentShape(Circle())
+        Text(title)
+          .font(size.font.weight(.medium))
+          .lineLimit(1)
+          .foregroundStyle(isSelected ? .primary : .secondary)
       }
-      .buttonStyle(.plain)
-      .padding(.trailing, 6)
+      .padding(.leading, 10)
+      .padding(.vertical, size.verticalPadding)
+      .contentShape(Rectangle())
+      .onTapGesture(perform: onSelect)
+      .accessibilityAddTraits(.isButton)
+
+      Image(systemName: "xmark")
+        .font(.caption2.weight(.bold))
+        .foregroundStyle(.secondary)
+        .padding(6)
+        .contentShape(Circle())
+        .onTapGesture(perform: onClose)
+        .accessibilityLabel("Close Tab")
+        .accessibilityAddTraits(.isButton)
+        .padding(.trailing, 6)
     }
     .background(
       Capsule()
@@ -1458,6 +1583,45 @@ private struct DesktopTabPillView: View {
           lineWidth: 1
         )
     )
+    .overlay {
+      MiddleClickView(action: onClose)
+    }
+  }
+}
+
+/// Only claims the middle button, so left and right clicks still reach the SwiftUI buttons.
+private struct MiddleClickView: NSViewRepresentable {
+  let action: () -> Void
+
+  func makeNSView(context: Context) -> MiddleClickNSView {
+    MiddleClickNSView()
+  }
+
+  func updateNSView(_ nsView: MiddleClickNSView, context: Context) {
+    nsView.action = action
+  }
+}
+
+private final class MiddleClickNSView: NSView {
+  var action: (() -> Void)?
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    guard let event = NSApp.currentEvent,
+          event.type == .otherMouseDown || event.type == .otherMouseUp,
+          event.buttonNumber == 2 else {
+      return nil
+    }
+
+    return super.hitTest(point)
+  }
+
+  override func otherMouseUp(with event: NSEvent) {
+    guard event.buttonNumber == 2 else {
+      super.otherMouseUp(with: event)
+      return
+    }
+
+    action?()
   }
 }
 

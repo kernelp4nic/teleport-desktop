@@ -13,6 +13,24 @@ struct SettingsStoreTests {
     #expect(!SettingsStore(defaults: defaults).localEchoEnabled)
   }
 
+  @Test func appearancePreferencesPersistAndClampFontSize() {
+    let defaults = makeDefaults()
+    let settings = SettingsStore(defaults: defaults)
+    #expect(settings.terminalFontSize == 13)
+    #expect(settings.tabSize == .regular)
+
+    settings.interfaceTheme = .dark
+    settings.tabSize = .large
+    settings.terminalFontFamily = "Menlo"
+    settings.terminalFontSize = 99
+
+    let reloaded = SettingsStore(defaults: defaults)
+    #expect(reloaded.interfaceTheme == .dark)
+    #expect(reloaded.tabSize == .large)
+    #expect(reloaded.terminalFontFamily == "Menlo")
+    #expect(reloaded.terminalFontSize == 36)
+  }
+
   @Test func terminalScrollbackUsesSaneDefault() {
     let defaults = makeDefaults()
 

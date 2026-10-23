@@ -60,6 +60,30 @@ final class DesktopTabStore {
     selectedTabID = id
   }
 
+  /// Drops the tab on the target's slot, landing after it when moving right.
+  func moveTab(id: UUID, onto targetID: UUID) {
+    guard id != targetID,
+          let from = tabs.firstIndex(where: { $0.id == id }),
+          let to = tabs.firstIndex(where: { $0.id == targetID }) else {
+      return
+    }
+
+    let tab = tabs.remove(at: from)
+    let targetIndex = tabs.firstIndex { $0.id == targetID } ?? tabs.count
+    tabs.insert(tab, at: from < to ? targetIndex + 1 : targetIndex)
+  }
+
+  @discardableResult
+  func moveSelectedTab(by offset: Int) -> Bool {
+    guard let index = tabs.firstIndex(where: { $0.id == selectedTabID }),
+          tabs.indices.contains(index + offset) else {
+      return false
+    }
+
+    tabs.swapAt(index, index + offset)
+    return true
+  }
+
   @discardableResult
   func selectNextTab() -> Bool {
     guard tabs.count > 1,

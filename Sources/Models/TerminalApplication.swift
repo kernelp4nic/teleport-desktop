@@ -11,6 +11,8 @@ enum TerminalApplication: String, CaseIterable, Identifiable {
   case wezTerm = "com.github.wez.wezterm"
   case alacritty = "org.alacritty"
   case hyper = "co.zeit.hyper"
+  case kaku = "fun.tw93.kaku"
+  case rio = "com.raphamorim.rio"
 
   var id: String {
     rawValue
@@ -36,6 +38,10 @@ enum TerminalApplication: String, CaseIterable, Identifiable {
       return "Alacritty"
     case .hyper:
       return "Hyper"
+    case .kaku:
+      return "Kaku"
+    case .rio:
+      return "Rio"
     }
   }
 

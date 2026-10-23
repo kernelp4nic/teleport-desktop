@@ -5,6 +5,10 @@ import Observation
 final class SettingsStore {
   static let defaultTerminalScrollbackLines = 10_000
   static let defaultSoundFeedbackVolume = 0.65
+  static let defaultSSHKeepAliveInterval = 30
+  static let defaultSSHKeepAliveCountMax = 3
+  static let defaultTerminalFontSize = 13.0
+  static let terminalFontSizeRange = 8.0...36.0
 
   private enum Keys {
     static let proxyAddress = "proxyAddress"
@@ -22,6 +26,13 @@ final class SettingsStore {
     static let onePasswordItem = "onePasswordItem"
     static let onePasswordVault = "onePasswordVault"
     static let onePasswordAccount = "onePasswordAccount"
+    static let sshKeepAliveEnabled = "sshKeepAliveEnabled"
+    static let sshKeepAliveInterval = "sshKeepAliveInterval"
+    static let sshKeepAliveCountMax = "sshKeepAliveCountMax"
+    static let interfaceTheme = "interfaceTheme"
+    static let tabSize = "tabSize"
+    static let terminalFontFamily = "terminalFontFamily"
+    static let terminalFontSize = "terminalFontSize"
   }
 
   @ObservationIgnored private let defaults: UserDefaults
@@ -59,6 +70,35 @@ final class SettingsStore {
   var terminalApplicationID: String {
     didSet {
       defaults.set(terminalApplicationID, forKey: Keys.terminalApplicationID)
+    }
+  }
+
+  var interfaceTheme: InterfaceTheme {
+    didSet {
+      defaults.set(interfaceTheme.rawValue, forKey: Keys.interfaceTheme)
+    }
+  }
+
+  var tabSize: TabSize {
+    didSet {
+      defaults.set(tabSize.rawValue, forKey: Keys.tabSize)
+    }
+  }
+
+  /// Empty means the system monospaced font.
+  var terminalFontFamily: String {
+    didSet {
+      defaults.set(terminalFontFamily, forKey: Keys.terminalFontFamily)
+    }
+  }
+
+  var terminalFontSize: Double {
+    didSet {
+      let clamped = min(max(terminalFontSize, Self.terminalFontSizeRange.lowerBound), Self.terminalFontSizeRange.upperBound)
+      if clamped != terminalFontSize {
+        terminalFontSize = clamped
+      }
+      defaults.set(terminalFontSize, forKey: Keys.terminalFontSize)
     }
   }
 
@@ -108,6 +148,33 @@ final class SettingsStore {
     }
   }
 
+  /// Sends SSH keepalives so idle sessions are not dropped by the network.
+  var sshKeepAliveEnabled: Bool {
+    didSet {
+      defaults.set(sshKeepAliveEnabled, forKey: Keys.sshKeepAliveEnabled)
+    }
+  }
+
+  /// Seconds between keepalive probes (`ServerAliveInterval`).
+  var sshKeepAliveInterval: Int {
+    didSet {
+      if sshKeepAliveInterval < 1 {
+        sshKeepAliveInterval = 1
+      }
+      defaults.set(sshKeepAliveInterval, forKey: Keys.sshKeepAliveInterval)
+    }
+  }
+
+  /// Unanswered probes before the connection is closed (`ServerAliveCountMax`).
+  var sshKeepAliveCountMax: Int {
+    didSet {
+      if sshKeepAliveCountMax < 1 {
+        sshKeepAliveCountMax = 1
+      }
+      defaults.set(sshKeepAliveCountMax, forKey: Keys.sshKeepAliveCountMax)
+    }
+  }
+
   var soundFeedbackEnabled: Bool {
     didSet {
       defaults.set(soundFeedbackEnabled, forKey: Keys.soundFeedbackEnabled)
@@ -134,6 +201,12 @@ final class SettingsStore {
     fallbackLogin = defaults.string(forKey: Keys.fallbackLogin) ?? ""
     terminalApplicationID = defaults.string(forKey: Keys.terminalApplicationID)
       ?? TerminalApplication.systemDefault.rawValue
+    interfaceTheme = InterfaceTheme(rawValue: defaults.string(forKey: Keys.interfaceTheme) ?? "") ?? .system
+    tabSize = TabSize(rawValue: defaults.string(forKey: Keys.tabSize) ?? "") ?? .regular
+    terminalFontFamily = defaults.string(forKey: Keys.terminalFontFamily) ?? ""
+    terminalFontSize = defaults.object(forKey: Keys.terminalFontSize) == nil
+      ? Self.defaultTerminalFontSize
+      : min(max(defaults.double(forKey: Keys.terminalFontSize), Self.terminalFontSizeRange.lowerBound), Self.terminalFontSizeRange.upperBound)
     terminalScrollbackLines = defaults.object(forKey: Keys.terminalScrollbackLines) == nil
       ? Self.defaultTerminalScrollbackLines
       : max(0, defaults.integer(forKey: Keys.terminalScrollbackLines))
@@ -145,6 +218,15 @@ final class SettingsStore {
     onePasswordItem = defaults.string(forKey: Keys.onePasswordItem) ?? ""
     onePasswordVault = defaults.string(forKey: Keys.onePasswordVault) ?? ""
     onePasswordAccount = defaults.string(forKey: Keys.onePasswordAccount) ?? ""
+    sshKeepAliveEnabled = defaults.object(forKey: Keys.sshKeepAliveEnabled) == nil
+      ? true
+      : defaults.bool(forKey: Keys.sshKeepAliveEnabled)
+    sshKeepAliveInterval = defaults.object(forKey: Keys.sshKeepAliveInterval) == nil
+      ? Self.defaultSSHKeepAliveInterval
+      : max(1, defaults.integer(forKey: Keys.sshKeepAliveInterval))
+    sshKeepAliveCountMax = defaults.object(forKey: Keys.sshKeepAliveCountMax) == nil
+      ? Self.defaultSSHKeepAliveCountMax
+      : max(1, defaults.integer(forKey: Keys.sshKeepAliveCountMax))
     soundFeedbackEnabled = defaults.object(forKey: Keys.soundFeedbackEnabled) == nil
       ? true
       : defaults.bool(forKey: Keys.soundFeedbackEnabled)

@@ -97,7 +97,18 @@ struct TeleportService {
       return nil
     }
 
-    return ShellQuoter.join(["tsh", "ssh", "\(login)@\(node.hostname)"])
+    var segments = ["tsh", "ssh"]
+
+    if settings.sshKeepAliveEnabled {
+      segments += [
+        "-o", "ServerAliveInterval=\(settings.sshKeepAliveInterval)",
+        "-o", "ServerAliveCountMax=\(settings.sshKeepAliveCountMax)",
+      ]
+    }
+
+    segments.append("\(login)@\(node.hostname)")
+
+    return ShellQuoter.join(segments)
   }
 
   static func normalizeProxyAddress(_ value: String?) -> String? {

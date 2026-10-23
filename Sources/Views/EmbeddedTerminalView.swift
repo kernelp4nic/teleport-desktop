@@ -7,11 +7,14 @@ struct EmbeddedTerminalView: NSViewRepresentable {
   let focusToken: Int
   let scrollbackLines: Int
   let localEchoEnabled: Bool
+  let fontFamily: String
+  let fontSize: Double
 
   func makeNSView(context: Context) -> TerminalContainerView {
     let containerView = TerminalContainerView()
     sessionStore.terminalController.setLocalEchoEnabled(localEchoEnabled)
     sessionStore.terminalController.setScrollbackLines(scrollbackLines)
+    sessionStore.terminalController.setFont(family: fontFamily, size: fontSize)
     containerView.attach(hostView: sessionStore.terminalController.hostView)
     containerView.focusTerminalIfNeeded(using: focusToken)
     return containerView
@@ -20,6 +23,7 @@ struct EmbeddedTerminalView: NSViewRepresentable {
   func updateNSView(_ nsView: TerminalContainerView, context: Context) {
     sessionStore.terminalController.setLocalEchoEnabled(localEchoEnabled)
     sessionStore.terminalController.setScrollbackLines(scrollbackLines)
+    sessionStore.terminalController.setFont(family: fontFamily, size: fontSize)
     nsView.attach(hostView: sessionStore.terminalController.hostView)
     nsView.focusTerminalIfNeeded(using: focusToken)
   }
@@ -85,6 +89,10 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
 
   func setScrollbackLines(_ lines: Int) {
     hostView.setScrollbackLines(lines)
+  }
+
+  func setFont(family: String, size: Double) {
+    hostView.setFont(family: family, size: size)
   }
 
   func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
@@ -222,6 +230,7 @@ final class ObservedLocalProcessTerminalView: LocalProcessTerminalView {
 final class TerminalHostView: NSView {
   private let contentInset: CGFloat = 12
   private var scrollbackLines = SettingsStore.defaultTerminalScrollbackLines
+  private var terminalFont = NSFont.monospacedSystemFont(ofSize: SettingsStore.defaultTerminalFontSize, weight: .regular)
   private(set) var terminalView: ObservedLocalProcessTerminalView?
 
   override init(frame frameRect: NSRect) {
@@ -256,7 +265,7 @@ final class TerminalHostView: NSView {
     )
     terminalView.translatesAutoresizingMaskIntoConstraints = false
     terminalView.configureNativeColors()
-    terminalView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+    terminalView.font = terminalFont
     terminalView.caretColor = .controlAccentColor
     terminalView.processDelegate = delegate
     terminalView.onFirstOutput = onFirstOutput
@@ -296,6 +305,19 @@ final class TerminalHostView: NSView {
 
     scrollbackLines = normalizedLines
     terminalView?.changeScrollback(normalizedLines == 0 ? nil : normalizedLines)
+  }
+
+  func setFont(family: String, size: Double) {
+    let descriptor = family.isEmpty
+      ? NSFont.monospacedSystemFont(ofSize: size, weight: .regular).fontDescriptor
+      : NSFontDescriptor(fontAttributes: [.family: family])
+    let font = NSFont(descriptor: descriptor, size: size) ?? .monospacedSystemFont(ofSize: size, weight: .regular)
+    guard font != terminalFont else {
+      return
+    }
+
+    terminalFont = font
+    terminalView?.font = font
   }
 
   func focusTerminal() {

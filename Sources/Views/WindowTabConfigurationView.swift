@@ -3,22 +3,11 @@ import SwiftUI
 
 struct WindowTabConfigurationView: NSViewRepresentable {
   let title: String
-  let onCloseTab: () -> Bool
-  let onSelectPreviousTab: () -> Bool
-  let onSelectNextTab: () -> Bool
-  let onShowSearch: () -> Bool
-  let onFindNext: () -> Bool
-  let onFindPrevious: () -> Bool
+  let actionForEvent: (NSEvent) -> DesktopAction?
+  let onAction: (DesktopAction) -> Bool
 
   func makeCoordinator() -> Coordinator {
-    Coordinator(
-      onCloseTab: onCloseTab,
-      onSelectPreviousTab: onSelectPreviousTab,
-      onSelectNextTab: onSelectNextTab,
-      onShowSearch: onShowSearch,
-      onFindNext: onFindNext,
-      onFindPrevious: onFindPrevious
-    )
+    Coordinator(actionForEvent: actionForEvent, onAction: onAction)
   }
 
   func makeNSView(context: Context) -> NSView {
@@ -26,12 +15,8 @@ struct WindowTabConfigurationView: NSViewRepresentable {
   }
 
   func updateNSView(_ nsView: NSView, context: Context) {
-    context.coordinator.onCloseTab = onCloseTab
-    context.coordinator.onSelectPreviousTab = onSelectPreviousTab
-    context.coordinator.onSelectNextTab = onSelectNextTab
-    context.coordinator.onShowSearch = onShowSearch
-    context.coordinator.onFindNext = onFindNext
-    context.coordinator.onFindPrevious = onFindPrevious
+    context.coordinator.actionForEvent = actionForEvent
+    context.coordinator.onAction = onAction
 
     DispatchQueue.main.async {
       guard let window = nsView.window else {
@@ -48,30 +33,18 @@ struct WindowTabConfigurationView: NSViewRepresentable {
 
 extension WindowTabConfigurationView {
   final class Coordinator {
-    var onCloseTab: () -> Bool
-    var onSelectPreviousTab: () -> Bool
-    var onSelectNextTab: () -> Bool
-    var onShowSearch: () -> Bool
-    var onFindNext: () -> Bool
-    var onFindPrevious: () -> Bool
+    var actionForEvent: (NSEvent) -> DesktopAction?
+    var onAction: (DesktopAction) -> Bool
 
     private weak var window: NSWindow?
     private var monitor: Any?
 
     init(
-      onCloseTab: @escaping () -> Bool,
-      onSelectPreviousTab: @escaping () -> Bool,
-      onSelectNextTab: @escaping () -> Bool,
-      onShowSearch: @escaping () -> Bool,
-      onFindNext: @escaping () -> Bool,
-      onFindPrevious: @escaping () -> Bool
+      actionForEvent: @escaping (NSEvent) -> DesktopAction?,
+      onAction: @escaping (DesktopAction) -> Bool
     ) {
-      self.onCloseTab = onCloseTab
-      self.onSelectPreviousTab = onSelectPreviousTab
-      self.onSelectNextTab = onSelectNextTab
-      self.onShowSearch = onShowSearch
-      self.onFindNext = onFindNext
-      self.onFindPrevious = onFindPrevious
+      self.actionForEvent = actionForEvent
+      self.onAction = onAction
     }
 
     deinit {
@@ -101,41 +74,11 @@ extension WindowTabConfigurationView {
           return event
         }
 
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-
-        if flags == [.command],
-           event.charactersIgnoringModifiers?.lowercased() == "w" {
-          return self.onCloseTab() ? nil : event
+        guard let action = self.actionForEvent(event) else {
+          return event
         }
 
-        if flags == [.command],
-           event.charactersIgnoringModifiers?.lowercased() == "f" {
-          return self.onShowSearch() ? nil : event
-        }
-
-        if flags == [.command],
-           event.charactersIgnoringModifiers?.lowercased() == "g" {
-          return self.onFindNext() ? nil : event
-        }
-
-        if flags == [.command, .shift],
-           event.charactersIgnoringModifiers?.lowercased() == "g" {
-          return self.onFindPrevious() ? nil : event
-        }
-
-        if flags.contains(.command),
-           flags.contains(.option) {
-          switch event.keyCode {
-          case 123:
-            return self.onSelectPreviousTab() ? nil : event
-          case 124:
-            return self.onSelectNextTab() ? nil : event
-          default:
-            break
-          }
-        }
-
-        return event
+        return self.onAction(action) ? nil : event
       }
     }
   }

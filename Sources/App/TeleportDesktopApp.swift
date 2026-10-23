@@ -15,13 +15,15 @@ struct TeleportDesktopApp: App {
   @State private var settingsStore = SettingsStore()
   @State private var nodeStore = TeleportNodeStore()
   @State private var libraryStore = NodeLibraryStore()
+  @State private var shortcutStore = ShortcutStore()
 
   var body: some Scene {
     WindowGroup("Teleport Desktop") {
       DesktopRootView(
         store: nodeStore,
         settings: settingsStore,
-        library: libraryStore
+        library: libraryStore,
+        shortcuts: shortcutStore
       )
         .frame(minWidth: 1080, minHeight: 720)
     }
@@ -40,7 +42,7 @@ struct TeleportDesktopApp: App {
     .menuBarExtraStyle(.window)
 
     Settings {
-      SettingsView(settings: settingsStore, store: nodeStore, library: libraryStore)
+      SettingsView(settings: settingsStore, store: nodeStore, library: libraryStore, shortcuts: shortcutStore)
     }
   }
 }

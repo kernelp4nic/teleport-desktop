@@ -67,7 +67,9 @@ struct TeleportLoginSheet: View {
             sessionStore: terminalStore,
             focusToken: focusToken,
             scrollbackLines: settings.terminalScrollbackLines,
-            localEchoEnabled: false
+            localEchoEnabled: false,
+            fontFamily: settings.terminalFontFamily,
+            fontSize: settings.terminalFontSize
           )
         } else {
           ProgressView()

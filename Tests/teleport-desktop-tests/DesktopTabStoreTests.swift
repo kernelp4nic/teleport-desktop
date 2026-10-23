@@ -156,4 +156,42 @@ struct DesktopTabStoreTests {
     #expect(store.selectPreviousTab())
     #expect(store.selectedTabID == secondTab.id)
   }
+
+  @MainActor
+  @Test func moveTabOntoTargetLandsOnTargetSlot() {
+    let store = DesktopTabStore()
+    let tabs = (1...3).map { openTab(in: store, name: "host-\($0)") }
+
+    store.moveTab(id: tabs[0].id, onto: tabs[2].id)
+    #expect(store.tabs.map(\.id) == [tabs[1].id, tabs[2].id, tabs[0].id])
+
+    store.moveTab(id: tabs[0].id, onto: tabs[1].id)
+    #expect(store.tabs.map(\.id) == [tabs[0].id, tabs[1].id, tabs[2].id])
+  }
+
+  @MainActor
+  @Test func moveSelectedTabKeepsSelectionAndStopsAtEdges() {
+    let store = DesktopTabStore()
+    let first = openTab(in: store, name: "host-1")
+    let second = openTab(in: store, name: "host-2")
+
+    // The last tab is selected, so moving right is past the edge.
+    #expect(!store.moveSelectedTab(by: 1))
+    #expect(store.tabs.map(\.id) == [first.id, second.id])
+
+    #expect(store.moveSelectedTab(by: -1))
+    #expect(store.tabs.map(\.id) == [second.id, first.id])
+    #expect(store.selectedTabID == second.id)
+  }
+
+  @MainActor
+  private func openTab(in store: DesktopTabStore, name: String) -> DesktopTab {
+    store.openTab(
+      windowState: DesktopWindowState.command(
+        "tsh ssh ubuntu@\(name)",
+        title: "ubuntu@\(name)",
+        summary: "Running tsh ssh as ubuntu"
+      )
+    )
+  }
 }

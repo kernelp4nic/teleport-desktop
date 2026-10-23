@@ -4,8 +4,10 @@ import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
   case general
+  case appearance
   case servers
   case terminal
+  case shortcuts
   case sounds
   case about
 
@@ -14,8 +16,10 @@ enum SettingsSection: String, CaseIterable, Identifiable {
   var title: String {
     switch self {
     case .general: return "General"
+    case .appearance: return "Appearance"
     case .servers: return "Servers"
     case .terminal: return "Terminal"
+    case .shortcuts: return "Shortcuts"
     case .sounds: return "Sounds"
     case .about: return "About"
     }
@@ -24,8 +28,10 @@ enum SettingsSection: String, CaseIterable, Identifiable {
   var icon: String {
     switch self {
     case .general: return "gearshape"
+    case .appearance: return "paintbrush"
     case .servers: return "server.rack"
     case .terminal: return "terminal"
+    case .shortcuts: return "keyboard"
     case .sounds: return "speaker.wave.2"
     case .about: return "info.circle"
     }
@@ -36,8 +42,11 @@ struct SettingsView: View {
   @Bindable var settings: SettingsStore
   @Bindable var store: TeleportNodeStore
   @Bindable var library: NodeLibraryStore
+  let shortcuts: ShortcutStore
   @State private var section: SettingsSection = .general
   @State private var onePasswordAccounts: [OnePasswordAccount] = []
+  @State private var recordingAction: DesktopAction?
+  @State private var shortcutError: String?
 
   var body: some View {
     HStack(spacing: 0) {
@@ -61,6 +70,11 @@ struct SettingsView: View {
       .background(Color(nsColor: .windowBackgroundColor))
     }
     .frame(minWidth: 760, idealWidth: 820, minHeight: 520, idealHeight: 600)
+    .preferredColorScheme(settings.interfaceTheme.colorScheme)
+    .onChange(of: section) {
+      recordingAction = nil
+      shortcutError = nil
+    }
   }
 
   private var sidebar: some View {
@@ -253,6 +267,31 @@ struct SettingsView: View {
         }
       }
       card {
+        Text("SSH connection")
+          .font(.headline)
+        toggle(
+          "Keep-alive",
+          "Sends periodic probes so idle sessions are not dropped by the network. Applies to new SSH sessions.",
+          $settings.sshKeepAliveEnabled
+        )
+        Divider()
+        row("Probe interval", "Seconds between probes (ServerAliveInterval).") {
+          TextField("Seconds", value: $settings.sshKeepAliveInterval, format: .number)
+            .labelsHidden()
+            .multilineTextAlignment(.trailing)
+            .frame(width: 100)
+        }
+        .disabled(!settings.sshKeepAliveEnabled)
+        Divider()
+        row("Missed probes", "Probes without a reply before the connection is closed (ServerAliveCountMax).") {
+          TextField("Count", value: $settings.sshKeepAliveCountMax, format: .number)
+            .labelsHidden()
+            .multilineTextAlignment(.trailing)
+            .frame(width: 100)
+        }
+        .disabled(!settings.sshKeepAliveEnabled)
+      }
+      card {
         Text("External terminal")
           .font(.headline)
         row("Terminal application", "Used only when you choose to open a session outside the app.") {
@@ -265,6 +304,75 @@ struct SettingsView: View {
           .labelsHidden()
           .pickerStyle(.menu)
           .frame(width: 200)
+        }
+      }
+
+    case .appearance:
+      card {
+        Text("Interface")
+          .font(.headline)
+        row("Theme", "Light or dark interface. System follows macOS.") {
+          Picker("Theme", selection: $settings.interfaceTheme) {
+            ForEach(InterfaceTheme.allCases) { Text($0.title).tag($0) }
+          }
+          .labelsHidden()
+          .frame(width: 200)
+        }
+        Divider()
+        row("Tab size", "Size of the tabs in the toolbar.") {
+          Picker("Tab size", selection: $settings.tabSize) {
+            ForEach(TabSize.allCases) { Text($0.title).tag($0) }
+          }
+          .labelsHidden()
+          .frame(width: 200)
+        }
+      }
+      card {
+        Text("Terminal Font")
+          .font(.headline)
+        row("Font", "Leave on System Monospaced for the macOS default.") {
+          Picker("Font", selection: $settings.terminalFontFamily) {
+            Text("System Monospaced").tag("")
+            ForEach(Self.fontFamilies, id: \.self) { Text($0).tag($0) }
+          }
+          .labelsHidden()
+          .frame(width: 200)
+        }
+        Divider()
+        row("Size", "Between 8 and 36 points.") {
+          Stepper(value: $settings.terminalFontSize, in: SettingsStore.terminalFontSizeRange, step: 1) {
+            Text("\(Int(settings.terminalFontSize)) pt")
+              .monospacedDigit()
+              .frame(width: 50, alignment: .leading)
+          }
+          .fixedSize()
+        }
+      }
+
+    case .shortcuts:
+      card {
+        HStack {
+          Text("Keyboard Shortcuts")
+            .font(.headline)
+          Spacer()
+          Button("Reset to Defaults") {
+            recordingAction = nil
+            shortcutError = nil
+            shortcuts.reset()
+          }
+        }
+
+        if let shortcutError {
+          Text(shortcutError)
+            .font(.callout)
+            .foregroundStyle(.red)
+        }
+
+        ForEach(DesktopAction.allCases) { action in
+          Divider()
+          row(action.title, "") {
+            shortcutControl(for: action)
+          }
         }
       }
 
@@ -369,6 +477,42 @@ struct SettingsView: View {
       get: { library.groupIcon(for: group, scopeKey: libraryScopeKey) ?? "" },
       set: { library.setGroupIcon($0, for: group, scopeKey: libraryScopeKey) }
     )
+  }
+
+  private static let fontFamilies = NSFontManager.shared.availableFontFamilies.sorted {
+    $0.localizedStandardCompare($1) == .orderedAscending
+  }
+
+  private func shortcutControl(for action: DesktopAction) -> some View {
+    HStack(spacing: 8) {
+      ShortcutRecorderView(
+        label: shortcuts.shortcut(for: action)?.label ?? "Unassigned",
+        isRecording: recordingAction == action,
+        onStart: {
+          shortcutError = nil
+          recordingAction = action
+        },
+        onFinish: { shortcut in
+          recordingAction = nil
+          guard let shortcut else {
+            return
+          }
+
+          shortcutError = shortcuts.assign(shortcut, to: action)
+        }
+      )
+      .frame(width: 170, height: 26)
+
+      Button {
+        shortcutError = nil
+        shortcuts.assign(nil, to: action)
+      } label: {
+        Image(systemName: "xmark.circle")
+      }
+      .buttonStyle(.borderless)
+      .help("Clear shortcut")
+      .disabled(shortcuts.shortcut(for: action) == nil)
+    }
   }
 
   private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
