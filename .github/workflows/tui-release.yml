@@ -1,0 +1,30 @@
+name: Release TUI
+
+# Push a tag like `tui-v0.2.0` to test the TUI and bump the Homebrew formula.
+on:
+  push:
+    tags: ["tui-v*"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test
+        run: cargo test --manifest-path tui/Cargo.toml
+
+      - name: Bump formula in the tap
+        env:
+          TAG: ${{ github.ref_name }}
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
+          sha=$(curl -fsSL "$url" | sha256sum | cut -d' ' -f1)
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/kernelp4nic/homebrew-tap.git" tap
+          cd tap
+          sed -i -E "s|^  url \".*\"|  url \"${url}\"|; s|^  sha256 \".*\"|  sha256 \"${sha}\"|" Formula/teleport-tui.rb
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git commit -am "teleport-tui ${TAG#tui-v}"
+          git push
