@@ -7,10 +7,16 @@ use std::{
     error::Error,
     sync::mpsc::{self, Sender},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::{
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    },
+    execute,
+};
 use nucleo_matcher::{
     pattern::{CaseMatching, Normalization, Pattern},
     Config as MatcherConfig, Matcher, Utf32Str,
@@ -19,7 +25,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, List, ListState, Paragraph},
+    widgets::{Block, Clear, List, ListState, Paragraph},
     DefaultTerminal, Frame,
 };
 use tui_term::widget::PseudoTerminal;
@@ -32,6 +38,7 @@ use tsh::{Node, Session};
 /// Everything the main loop reacts to arrives through one channel.
 pub enum Msg {
     Key(KeyEvent),
+    Mouse(MouseEvent),
     Redraw,
     Output(usize, String),
     Exited(usize),
@@ -46,6 +53,12 @@ struct LoginState {
     detector: PromptDetector,
 }
 
+/// Editable copy of the config shown by the settings screen (ctrl-o).
+struct Settings {
+    values: Vec<String>,
+    selected: usize,
+}
+
 struct Tab {
     id: usize,
     title: String,
@@ -57,6 +70,7 @@ struct App {
     tx: Sender<Msg>,
     config: Config,
     notice: Option<String>,
+    settings: Option<Settings>,
     nodes: Vec<Node>,
     session: Session,
     loading: bool,
@@ -72,6 +86,9 @@ struct App {
     prefix: bool,
     next_id: usize,
     content: (u16, u16),
+    /// Where the host list was last drawn and when a row was last clicked, for double-clicks.
+    list_area: Rect,
+    last_click: Option<(usize, Instant)>,
 }
 
 impl App {
@@ -80,6 +97,7 @@ impl App {
             tx,
             config,
             notice: None,
+            settings: None,
             nodes: Vec::new(),
             session: Session::default(),
             loading: false,
@@ -93,6 +111,8 @@ impl App {
             prefix: false,
             next_id: 0,
             content: (24, 80),
+            list_area: Rect::default(),
+            last_click: None,
         }
     }
 
@@ -188,6 +208,7 @@ impl App {
     fn handle(&mut self, msg: Msg) -> bool {
         match msg {
             Msg::Key(key) => return self.on_key(key),
+            Msg::Mouse(mouse) => self.on_mouse(mouse),
             Msg::Redraw => {}
             Msg::Output(id, text) => self.on_output(id, &text),
             Msg::Exited(id) => self.on_exit(id),
@@ -318,6 +339,69 @@ impl App {
         false
     }
 
+    fn on_mouse(&mut self, mouse: MouseEvent) {
+        if self.settings.is_some() {
+            return;
+        }
+        let (col, row) = (mouse.column, mouse.row);
+        match mouse.kind {
+            MouseEventKind::Down(button) if row == 0 => {
+                let Some(target) = self.tab_at(col) else { return };
+                match button {
+                    MouseButton::Left => self.active = target,
+                    MouseButton::Middle if target > 0 => {
+                        self.active = target;
+                        self.close_active();
+                    }
+                    _ => {}
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) if self.active == 0 => self.click_host(col, row),
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                let up = mouse.kind == MouseEventKind::ScrollUp;
+                if self.active == 0 {
+                    self.move_selection(if up { -1 } else { 1 });
+                } else {
+                    self.tabs[self.active - 1].pty.scroll(if up { 3 } else { -3 });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Index of the tab bar entry under `col`: 0 is Hosts, n > 0 is tabs[n - 1].
+    fn tab_at(&self, col: u16) -> Option<usize> {
+        let mut start = 0;
+        for (i, label) in self.tab_labels().iter().enumerate() {
+            let end = start + label.chars().count() as u16;
+            if (start..end).contains(&col) {
+                return Some(i);
+            }
+            start = end;
+        }
+        None
+    }
+
+    /// Clicking selects a host, clicking it again within half a second opens it.
+    fn click_host(&mut self, col: u16, row: u16) {
+        let area = self.list_area;
+        let inside = col > area.x && col + 1 < area.right() && row > area.y && row + 1 < area.bottom();
+        if !inside {
+            return;
+        }
+        let index = (row - area.y - 1) as usize + self.list.offset();
+        if index >= self.visible.len() {
+            return;
+        }
+        self.list.select(Some(index));
+        let double = self.last_click.is_some_and(|(i, t)| i == index && t.elapsed() < Duration::from_millis(500));
+        self.last_click = Some((index, Instant::now()));
+        if double {
+            self.last_click = None;
+            self.open_session();
+        }
+    }
+
     fn on_prefix(&mut self, key: KeyEvent) -> bool {
         let total = self.tabs.len() + 1;
         match key.code {
@@ -339,7 +423,42 @@ impl App {
         false
     }
 
+    fn open_settings(&mut self) {
+        let values = Config::KEYS.iter().map(|k| self.config.get(k).to_string()).collect();
+        self.settings = Some(Settings { values, selected: 0 });
+    }
+
+    fn on_settings_key(&mut self, key: KeyEvent, ctrl: bool) {
+        let Some(settings) = self.settings.as_mut() else { return };
+        let last = settings.values.len() - 1;
+        match key.code {
+            KeyCode::Esc => self.settings = None,
+            KeyCode::Up | KeyCode::BackTab => settings.selected = settings.selected.saturating_sub(1),
+            KeyCode::Down | KeyCode::Tab => settings.selected = (settings.selected + 1).min(last),
+            KeyCode::Char('u') if ctrl => settings.values[settings.selected].clear(),
+            KeyCode::Backspace => {
+                settings.values[settings.selected].pop();
+            }
+            KeyCode::Char(c) if !ctrl => settings.values[settings.selected].push(c),
+            KeyCode::Enter => {
+                for (k, v) in Config::KEYS.iter().zip(&settings.values) {
+                    self.config.set(k, v);
+                }
+                self.notice = Some(match self.config.save() {
+                    Ok(()) => "Settings saved".to_string(),
+                    Err(e) => format!("Could not save settings: {e}"),
+                });
+                self.settings = None;
+            }
+            _ => {}
+        }
+    }
+
     fn on_picker_key(&mut self, key: KeyEvent, ctrl: bool) -> bool {
+        if self.settings.is_some() {
+            self.on_settings_key(key, ctrl);
+            return false;
+        }
         match key.code {
             KeyCode::Esc => return self.leave_picker(),
             KeyCode::Char('c') if ctrl => return self.leave_picker(),
@@ -349,6 +468,7 @@ impl App {
             KeyCode::Char('n') if ctrl => self.move_selection(1),
             KeyCode::Char('r') if ctrl => self.reload(),
             KeyCode::Char('l') if ctrl => self.start_login(),
+            KeyCode::Char('o') if ctrl => self.open_settings(),
             KeyCode::Char('u') if ctrl => {
                 self.query.clear();
                 self.refilter();
@@ -386,16 +506,25 @@ impl App {
         }
     }
 
+    /// Tab bar entries in order, Hosts first; also used to hit-test mouse clicks.
+    fn tab_labels(&self) -> Vec<String> {
+        let tabs = self.tabs.iter().enumerate().map(|(i, tab)| {
+            let mark = if tab.pty.exited { " ✗" } else { "" };
+            format!(" {} {}{} ", i + 1, tab.title, mark)
+        });
+        std::iter::once(" Hosts ".to_string()).chain(tabs).collect()
+    }
+
     fn tab_bar(&self) -> Line<'static> {
         let style = |on: bool| {
             if on { Style::new().add_modifier(Modifier::REVERSED) } else { Style::new() }
         };
-        let mut spans = vec![Span::styled(" Hosts ", style(self.active == 0))];
-        for (i, tab) in self.tabs.iter().enumerate() {
-            let mark = if tab.pty.exited { " ✗" } else { "" };
-            let label = format!(" {} {}{} ", i + 1, tab.title, mark);
-            spans.push(Span::styled(label, style(self.active == i + 1)));
-        }
+        let mut spans: Vec<Span> = self
+            .tab_labels()
+            .into_iter()
+            .enumerate()
+            .map(|(i, label)| Span::styled(label, style(self.active == i)))
+            .collect();
         match (&self.notice, self.prefix) {
             (_, true) => spans.push(
                 Span::raw("  ^G… n/p switch  1-9 jump  h hosts  w close  q quit  g literal ^G").dark_gray(),
@@ -438,6 +567,7 @@ impl App {
         } else {
             format!("Hosts ({}/{})", self.visible.len(), self.nodes.len())
         };
+        self.list_area = body;
         frame.render_stateful_widget(
             List::new(items)
                 .block(Block::bordered().title(title))
@@ -449,12 +579,43 @@ impl App {
         let line = match &self.error {
             Some(e) => Line::from(format!("{e}  (ctrl-l to log in)")).red(),
             None => Line::from(format!(
-                "{}  |  enter open  ctrl-l login  ctrl-r reload  esc back",
+                "{}  |  enter open  ctrl-l login  ctrl-o settings  ctrl-r reload  esc back",
                 self.session.summary
             ))
             .dark_gray(),
         };
         frame.render_widget(Paragraph::new(line), status);
+
+        if let Some(settings) = &self.settings {
+            Self::draw_settings(frame, area, settings);
+        }
+    }
+
+    fn draw_settings(frame: &mut Frame, area: Rect, settings: &Settings) {
+        let labels = ["Teleport proxy", "Teleport user", "1Password item", "1Password vault", "1Password account"];
+        let height = labels.len() as u16 + 4;
+        let popup = Rect {
+            x: area.x + area.width.saturating_sub(60) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
+            width: area.width.min(60),
+            height: area.height.min(height),
+        };
+        let mut lines: Vec<Line> = labels
+            .iter()
+            .zip(&settings.values)
+            .enumerate()
+            .map(|(i, (label, value))| {
+                let line = Line::from(format!("{label:<18} {value}"));
+                if i == settings.selected { line.add_modifier(Modifier::REVERSED) } else { line }
+            })
+            .collect();
+        lines.push(Line::from(""));
+        lines.push(Line::from("enter save  esc cancel  tab/↑↓ move  ctrl-u clear").dark_gray());
+
+        frame.render_widget(Clear, popup);
+        frame.render_widget(Paragraph::new(lines).block(Block::bordered().title("Settings")), popup);
+        let cursor_x = popup.x + 1 + 19 + settings.values[settings.selected].chars().count() as u16;
+        frame.set_cursor_position((cursor_x.min(popup.right().saturating_sub(2)), popup.y + 1 + settings.selected as u16));
     }
 
     fn shutdown(&mut self) {
@@ -491,6 +652,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     thread::spawn(move || loop {
         let msg = match event::read() {
             Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => Msg::Key(key),
+            Ok(Event::Mouse(mouse)) => Msg::Mouse(mouse),
             Ok(Event::Resize(..)) => Msg::Redraw,
             Ok(_) => continue,
             Err(_) => break,
@@ -502,7 +664,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut app = App::new(tx, Config::load());
     let mut terminal = ratatui::init();
+    let _ = execute!(std::io::stdout(), EnableMouseCapture);
     let result = run(&mut terminal, &mut app, rx);
+    let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     app.shutdown();
     result

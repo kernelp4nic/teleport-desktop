@@ -26,7 +26,36 @@ impl Config {
         config
     }
 
-    fn set(&mut self, key: &str, value: &str) {
+    /// Setting keys in the order the settings screen shows them.
+    pub const KEYS: [&'static str; 5] = ["proxy", "user", "op-item", "op-vault", "op-account"];
+
+    pub fn get(&self, key: &str) -> &str {
+        let value = match key {
+            "proxy" => &self.proxy,
+            "user" => &self.user,
+            "op-item" => &self.op_item,
+            "op-vault" => &self.op_vault,
+            "op-account" => &self.op_account,
+            _ => &None,
+        };
+        value.as_deref().unwrap_or("")
+    }
+
+    /// Writes every setting to the config file, creating it if needed.
+    pub fn save(&self) -> Result<(), String> {
+        let path = config_path().ok_or("Could not locate the config directory.")?;
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        let text: String = Self::KEYS
+            .iter()
+            .filter(|k| !self.get(k).is_empty())
+            .map(|k| format!("{k} = {}\n", self.get(k)))
+            .collect();
+        fs::write(path, text).map_err(|e| e.to_string())
+    }
+
+    pub fn set(&mut self, key: &str, value: &str) {
         let value = Some(value.trim().to_string()).filter(|v| !v.is_empty());
         match key {
             "proxy" => self.proxy = value.map(normalize_proxy),
