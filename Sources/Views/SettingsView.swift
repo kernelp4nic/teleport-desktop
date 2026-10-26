@@ -267,31 +267,6 @@ struct SettingsView: View {
         }
       }
       card {
-        Text("SSH connection")
-          .font(.headline)
-        toggle(
-          "Keep-alive",
-          "Sends periodic probes so idle sessions are not dropped by the network. Applies to new SSH sessions.",
-          $settings.sshKeepAliveEnabled
-        )
-        Divider()
-        row("Probe interval", "Seconds between probes (ServerAliveInterval).") {
-          TextField("Seconds", value: $settings.sshKeepAliveInterval, format: .number)
-            .labelsHidden()
-            .multilineTextAlignment(.trailing)
-            .frame(width: 100)
-        }
-        .disabled(!settings.sshKeepAliveEnabled)
-        Divider()
-        row("Missed probes", "Probes without a reply before the connection is closed (ServerAliveCountMax).") {
-          TextField("Count", value: $settings.sshKeepAliveCountMax, format: .number)
-            .labelsHidden()
-            .multilineTextAlignment(.trailing)
-            .frame(width: 100)
-        }
-        .disabled(!settings.sshKeepAliveEnabled)
-      }
-      card {
         Text("External terminal")
           .font(.headline)
         row("Terminal application", "Used only when you choose to open a session outside the app.") {

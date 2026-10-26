@@ -95,45 +95,8 @@ struct TeleportServiceTests {
     )
 
     #expect(
-      command == "tsh ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=3 ubuntu@acme.web01"
+      command == "tsh ssh ubuntu@acme.web01"
     )
-  }
-
-  @Test func connectCommandOmitsKeepAliveWhenDisabled() {
-    let defaults = UserDefaults(suiteName: "TeleportServiceTests.keepAlive.\(UUID().uuidString)")!
-    let settings = SettingsStore(defaults: defaults)
-    settings.loginLabelKey = "user"
-    settings.fallbackLogin = "ec2-user"
-    settings.sshKeepAliveEnabled = false
-
-    let node = TeleportNode(
-      id: "node-1",
-      hostname: "acme.web01",
-      address: "Tunnel",
-      labels: [
-        TeleportLabel(key: "user", value: "ubuntu")
-      ],
-      labelMap: [
-        "user": "ubuntu"
-      ]
-    )
-
-    let session = TeleportSession(
-      state: .active,
-      proxy: nil,
-      cluster: "teleport.example.com",
-      username: "sebastianm",
-      logins: ["ubuntu", "ec2-user"],
-      validUntil: nil
-    )
-
-    let command = TeleportService().connectCommand(
-      for: node,
-      settings: settings,
-      session: session
-    )
-
-    #expect(command == "tsh ssh ubuntu@acme.web01")
   }
 
   @Test func loginCommandIncludesProxyAndUser() {

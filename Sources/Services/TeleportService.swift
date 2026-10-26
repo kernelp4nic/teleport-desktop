@@ -99,13 +99,6 @@ struct TeleportService {
 
     var segments = ["tsh", "ssh"]
 
-    if settings.sshKeepAliveEnabled {
-      segments += [
-        "-o", "ServerAliveInterval=\(settings.sshKeepAliveInterval)",
-        "-o", "ServerAliveCountMax=\(settings.sshKeepAliveCountMax)",
-      ]
-    }
-
     segments.append("\(login)@\(node.hostname)")
 
     return ShellQuoter.join(segments)
