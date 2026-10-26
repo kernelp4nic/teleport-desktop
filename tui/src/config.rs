@@ -8,6 +8,9 @@ pub struct Config {
     pub op_item: Option<String>,
     pub op_vault: Option<String>,
     pub op_account: Option<String>,
+    /// Defaults for the scp dialog.
+    pub scp_remote: Option<String>,
+    pub scp_local: Option<String>,
 }
 
 impl Config {
@@ -27,7 +30,8 @@ impl Config {
     }
 
     /// Setting keys in the order the settings screen shows them.
-    pub const KEYS: [&'static str; 5] = ["proxy", "user", "op-item", "op-vault", "op-account"];
+    pub const KEYS: [&'static str; 7] =
+        ["proxy", "user", "op-item", "op-vault", "op-account", "scp-remote", "scp-local"];
 
     pub fn get(&self, key: &str) -> &str {
         let value = match key {
@@ -36,6 +40,8 @@ impl Config {
             "op-item" => &self.op_item,
             "op-vault" => &self.op_vault,
             "op-account" => &self.op_account,
+            "scp-remote" => &self.scp_remote,
+            "scp-local" => &self.scp_local,
             _ => &None,
         };
         value.as_deref().unwrap_or("")
@@ -63,6 +69,8 @@ impl Config {
             "op-item" => self.op_item = value,
             "op-vault" => self.op_vault = value,
             "op-account" => self.op_account = value,
+            "scp-remote" => self.scp_remote = value,
+            "scp-local" => self.scp_local = value,
             _ => {}
         }
     }

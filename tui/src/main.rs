@@ -59,6 +59,16 @@ struct Settings {
     selected: usize,
 }
 
+/// The scp dialog (ctrl-t). Row 0 is the direction, rows 1 and 2 the remote and local paths.
+struct Transfer {
+    upload: bool,
+    remote: String,
+    local: String,
+    selected: usize,
+    host: String,
+    target: String,
+}
+
 struct Tab {
     id: usize,
     title: String,
@@ -71,6 +81,7 @@ struct App {
     config: Config,
     notice: Option<String>,
     settings: Option<Settings>,
+    transfer: Option<Transfer>,
     nodes: Vec<Node>,
     session: Session,
     loading: bool,
@@ -98,6 +109,7 @@ impl App {
             config,
             notice: None,
             settings: None,
+            transfer: None,
             nodes: Vec::new(),
             session: Session::default(),
             loading: false,
@@ -340,7 +352,7 @@ impl App {
     }
 
     fn on_mouse(&mut self, mouse: MouseEvent) {
-        if self.settings.is_some() {
+        if self.settings.is_some() || self.transfer.is_some() {
             return;
         }
         let (col, row) = (mouse.column, mouse.row);
@@ -454,7 +466,70 @@ impl App {
         }
     }
 
+    fn open_transfer(&mut self) {
+        let Some(node) = self.selected() else { return };
+        let host = node.hostname.clone();
+        let target = match self.login_for(node) {
+            Some(login) => format!("{login}@{host}"),
+            None => host.clone(),
+        };
+        self.transfer = Some(Transfer {
+            upload: false,
+            remote: self.config.scp_remote.clone().unwrap_or_else(|| ".".into()),
+            local: self.config.scp_local.clone().unwrap_or_else(|| "~/Downloads".into()),
+            selected: 1,
+            host,
+            target,
+        });
+    }
+
+    fn on_transfer_key(&mut self, key: KeyEvent, ctrl: bool) {
+        let Some(t) = self.transfer.as_mut() else { return };
+        match key.code {
+            KeyCode::Esc => self.transfer = None,
+            KeyCode::Up | KeyCode::BackTab => t.selected = t.selected.saturating_sub(1),
+            KeyCode::Down | KeyCode::Tab => t.selected = (t.selected + 1).min(2),
+            KeyCode::Left | KeyCode::Right if t.selected == 0 => t.upload = !t.upload,
+            KeyCode::Char(' ') if t.selected == 0 => t.upload = !t.upload,
+            KeyCode::Enter => self.start_transfer(),
+            _ if t.selected == 0 => {}
+            KeyCode::Char('u') if ctrl => {
+                if t.selected == 1 { t.remote.clear() } else { t.local.clear() }
+            }
+            KeyCode::Backspace => {
+                if t.selected == 1 { t.remote.pop() } else { t.local.pop() };
+            }
+            KeyCode::Char(c) if !ctrl => {
+                if t.selected == 1 { t.remote.push(c) } else { t.local.push(c) }
+            }
+            _ => {}
+        }
+    }
+
+    /// Runs `tsh scp` in a new tab so progress, prompts and errors stay visible.
+    fn start_transfer(&mut self) {
+        let Some(t) = self.transfer.take() else { return };
+        let remote = format!("{}:{}", t.target, t.remote.trim());
+        let local = expand_home(t.local.trim());
+        let (from, to) = if t.upload { (local, remote) } else { (remote, local) };
+
+        let id = self.next_id;
+        self.next_id += 1;
+        let title = format!("scp {}", t.host);
+        match PtySession::spawn(id, "tsh", &["scp", "-r", &from, &to], self.content, self.tx.clone()) {
+            Ok(pty) => {
+                self.tabs.push(Tab { id, title, pty, login: None });
+                self.active = self.tabs.len();
+            }
+            Err(e) => self.error = Some(e),
+        }
+    }
+
     fn on_picker_key(&mut self, key: KeyEvent, ctrl: bool) -> bool {
+        if self.transfer.is_some() {
+            self.on_transfer_key(key, ctrl);
+            return false;
+        }
         if self.settings.is_some() {
             self.on_settings_key(key, ctrl);
             return false;
@@ -469,6 +544,7 @@ impl App {
             KeyCode::Char('r') if ctrl => self.reload(),
             KeyCode::Char('l') if ctrl => self.start_login(),
             KeyCode::Char('o') if ctrl => self.open_settings(),
+            KeyCode::Char('t') if ctrl => self.open_transfer(),
             KeyCode::Char('u') if ctrl => {
                 self.query.clear();
                 self.refilter();
@@ -579,7 +655,7 @@ impl App {
         let line = match &self.error {
             Some(e) => Line::from(format!("{e}  (ctrl-l to log in)")).red(),
             None => Line::from(format!(
-                "{}  |  enter open  ctrl-l login  ctrl-o settings  ctrl-r reload  esc back",
+                "{}  |  enter open  ctrl-t scp  ctrl-l login  ctrl-o settings  ctrl-r reload  esc back",
                 self.session.summary
             ))
             .dark_gray(),
@@ -587,12 +663,39 @@ impl App {
         frame.render_widget(Paragraph::new(line), status);
 
         if let Some(settings) = &self.settings {
-            Self::draw_settings(frame, area, settings);
+            let labels = [
+                "Teleport proxy",
+                "Teleport user",
+                "1Password item",
+                "1Password vault",
+                "1Password account",
+                "scp remote path",
+                "scp local path",
+            ];
+            let hint = "enter save  esc cancel  tab/↑↓ move  ctrl-u clear";
+            Self::draw_form(frame, area, "Settings", &labels, &settings.values, settings.selected, true, hint);
+        }
+        if let Some(t) = &self.transfer {
+            let direction = if t.upload { "◂ Upload ▸" } else { "◂ Download ▸" };
+            let values = [direction.to_string(), t.remote.clone(), t.local.clone()];
+            let title = format!("scp {}", t.target);
+            let hint = "enter run  esc cancel  tab/↑↓ move  ←/→ direction";
+            let labels = ["Direction", "Remote path", "Local path"];
+            Self::draw_form(frame, area, &title, &labels, &values, t.selected, t.selected > 0, hint);
         }
     }
 
-    fn draw_settings(frame: &mut Frame, area: Rect, settings: &Settings) {
-        let labels = ["Teleport proxy", "Teleport user", "1Password item", "1Password vault", "1Password account"];
+    #[allow(clippy::too_many_arguments)]
+    fn draw_form(
+        frame: &mut Frame,
+        area: Rect,
+        title: &str,
+        labels: &[&str],
+        values: &[String],
+        selected: usize,
+        show_cursor: bool,
+        hint: &str,
+    ) {
         let height = labels.len() as u16 + 4;
         let popup = Rect {
             x: area.x + area.width.saturating_sub(60) / 2,
@@ -602,26 +705,40 @@ impl App {
         };
         let mut lines: Vec<Line> = labels
             .iter()
-            .zip(&settings.values)
+            .zip(values)
             .enumerate()
             .map(|(i, (label, value))| {
                 let line = Line::from(format!("{label:<18} {value}"));
-                if i == settings.selected { line.add_modifier(Modifier::REVERSED) } else { line }
+                if i == selected { line.add_modifier(Modifier::REVERSED) } else { line }
             })
             .collect();
         lines.push(Line::from(""));
-        lines.push(Line::from("enter save  esc cancel  tab/↑↓ move  ctrl-u clear").dark_gray());
+        lines.push(Line::from(hint.to_string()).dark_gray());
 
         frame.render_widget(Clear, popup);
-        frame.render_widget(Paragraph::new(lines).block(Block::bordered().title("Settings")), popup);
-        let cursor_x = popup.x + 1 + 19 + settings.values[settings.selected].chars().count() as u16;
-        frame.set_cursor_position((cursor_x.min(popup.right().saturating_sub(2)), popup.y + 1 + settings.selected as u16));
+        frame.render_widget(Paragraph::new(lines).block(Block::bordered().title(title.to_string())), popup);
+        if show_cursor {
+            let cursor_x = popup.x + 1 + 19 + values[selected].chars().count() as u16;
+            frame.set_cursor_position((cursor_x.min(popup.right().saturating_sub(2)), popup.y + 1 + selected as u16));
+        }
     }
 
     fn shutdown(&mut self) {
         for tab in &mut self.tabs {
             tab.pty.kill();
         }
+    }
+}
+
+/// `tsh` is spawned without a shell, so a leading `~` is expanded here.
+fn expand_home(path: &str) -> String {
+    expand_home_with(path, std::env::var("HOME").ok())
+}
+
+fn expand_home_with(path: &str, home: Option<String>) -> String {
+    match (path.strip_prefix('~'), home) {
+        (Some(rest), Some(home)) if rest.is_empty() || rest.starts_with('/') => format!("{home}{rest}"),
+        _ => path.to_string(),
     }
 }
 
@@ -677,6 +794,15 @@ mod tests {
     use std::{collections::BTreeMap, time::Duration};
 
     use super::*;
+
+    #[test]
+    fn expands_only_a_leading_home() {
+        let home = || Some("/home/bob".to_string());
+        assert_eq!(expand_home_with("~/Downloads", home()), "/home/bob/Downloads");
+        assert_eq!(expand_home_with("~", home()), "/home/bob");
+        assert_eq!(expand_home_with("~alice/x", home()), "~alice/x");
+        assert_eq!(expand_home_with("/tmp/~", home()), "/tmp/~");
+    }
 
     #[test]
     fn filters_and_resolves_login() {
