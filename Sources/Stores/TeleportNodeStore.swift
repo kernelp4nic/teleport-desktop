@@ -17,6 +17,9 @@ final class TeleportNodeStore {
   var nodes: [TeleportNode] = []
   var session: TeleportSession = .unavailable(proxy: nil)
   var isLoading = false
+  /// True until the first refresh has resolved the real `tsh` session state, so
+  /// views don't flash "Session unavailable" while it is still being checked.
+  var isCheckingSession = true
   var errorMessage: String?
   var lastRefreshedAt: Date?
   var lastRefreshAttemptAt: Date?
@@ -41,6 +44,7 @@ final class TeleportNodeStore {
       nodes = DemoContent.nodes
       session = DemoContent.session
       lastRefreshedAt = Date()
+      isCheckingSession = false
     } else if let cachedNodes = nodeCache.loadMostRecentNodes() {
       nodes = cachedNodes.nodes
       lastRefreshedAt = cachedNodes.fetchedAt
@@ -97,6 +101,10 @@ final class TeleportNodeStore {
 
     if isLoading {
       isLoading = false
+    }
+
+    if isCheckingSession {
+      isCheckingSession = false
     }
 
     isRefreshing = false

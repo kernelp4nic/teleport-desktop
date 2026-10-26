@@ -527,6 +527,14 @@ struct DesktopRootView: View {
               .strokeBorder(.quaternary, lineWidth: 1)
           )
           .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else if store.isCheckingSession {
+        VStack(spacing: 12) {
+          ProgressView()
+          Text("Checking Teleport session...")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else if store.session.state != .active {
         ContentUnavailableView {
           Label("Teleport Login Required", systemImage: "person.badge.key")
@@ -564,6 +572,10 @@ struct DesktopRootView: View {
   }
 
   private var statusLine: String {
+    if store.isCheckingSession {
+      return "Checking session..."
+    }
+
     var components = [store.session.statusText]
 
     if let username = store.session.username {

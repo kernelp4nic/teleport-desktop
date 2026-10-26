@@ -204,6 +204,10 @@ struct MenuBarRootView: View {
   }
 
   private var statusLine: String {
+    if store.isCheckingSession {
+      return "Checking session..."
+    }
+
     var components = [store.session.statusText]
 
     if let username = store.session.username {
