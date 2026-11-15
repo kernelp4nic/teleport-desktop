@@ -40,7 +40,10 @@ struct DesktopRootView: View {
       sidebar
         .navigationSplitViewColumnWidth(min: 320, ideal: 360)
     } detail: {
-      detail
+      VStack(spacing: 0) {
+        sessionTabStrip
+        detail
+      }
     }
     .background(
       WindowTabConfigurationView(
@@ -64,10 +67,6 @@ struct DesktopRootView: View {
     .animation(.easeInOut(duration: 0.2), value: fileTransferToastMessage)
     .preferredColorScheme(settings.interfaceTheme.colorScheme)
     .toolbar {
-      ToolbarItem(placement: .principal) {
-        toolbarTabStrip
-      }
-
       ToolbarItemGroup {
         Button {
           toggleCommandPalette()
@@ -188,37 +187,75 @@ struct DesktopRootView: View {
   }
 
   @ViewBuilder
-  private var toolbarTabStrip: some View {
+  private var sessionTabStrip: some View {
     if !tabStore.tabs.isEmpty {
-      ScrollView(.horizontal) {
-        HStack(spacing: 6) {
-          ForEach(tabStore.tabs) { tab in
-            DesktopTabPillView(
-              title: tab.terminalStore.currentTitle,
-              icon: groupIcon(forNodeID: tab.terminalStore.connectedNodeID ?? tab.selectedNodeID),
-              isSelected: tab.id == tabStore.selectedTabID,
-              size: settings.tabSize,
-              onSelect: {
-                tabStore.selectTab(id: tab.id)
-              },
-              onClose: {
-                closeTab(tab)
+      HStack(spacing: 8) {
+        ScrollViewReader { proxy in
+          ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+              ForEach(tabStore.tabs) { tab in
+                DesktopTabPillView(
+                  title: tab.terminalStore.currentTitle,
+                  icon: groupIcon(forNodeID: tab.terminalStore.connectedNodeID ?? tab.selectedNodeID),
+                  isSelected: tab.id == tabStore.selectedTabID,
+                  size: settings.tabSize,
+                  onSelect: {
+                    tabStore.selectTab(id: tab.id)
+                  },
+                  onClose: {
+                    closeTab(tab)
+                  }
+                )
+                .id(tab.id)
+                .frame(minWidth: 120, maxWidth: 220)
+                .help(tab.terminalStore.currentTitle)
+                .onDrag {
+                  NSItemProvider(object: tab.id.uuidString as NSString)
+                }
+                .onDrop(of: [.plainText], isTargeted: nil) { providers in
+                  moveDraggedTab(from: providers, onto: tab.id)
+                }
               }
-            )
-            .onDrag {
-              NSItemProvider(object: tab.id.uuidString as NSString)
             }
-            .onDrop(of: [.plainText], isTargeted: nil) { providers in
-              moveDraggedTab(from: providers, onto: tab.id)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+          }
+          .scrollIndicators(.hidden)
+          .fixedSize(horizontal: false, vertical: true)
+          .onChange(of: tabStore.selectedTabID, initial: true) {
+            if let selectedID = tabStore.selectedTabID {
+              proxy.scrollTo(selectedID)
+            }
+          }
+          .onChange(of: tabStore.tabs.map(\.id)) {
+            if let selectedID = tabStore.selectedTabID {
+              proxy.scrollTo(selectedID)
             }
           }
         }
-        .padding(.horizontal, 2)
-        .padding(.vertical, 1)
+
+        Menu {
+          ForEach(tabStore.tabs) { tab in
+            Button {
+              tabStore.selectTab(id: tab.id)
+            } label: {
+              if tab.id == tabStore.selectedTabID {
+                Label(tab.terminalStore.currentTitle, systemImage: "checkmark")
+              } else {
+                Text(tab.terminalStore.currentTitle)
+              }
+            }
+          }
+        } label: {
+          Label("\(tabStore.tabs.count)", systemImage: "list.bullet")
+        }
+        .fixedSize()
+        .help("All open tabs")
+        .accessibilityLabel("All open tabs (\(tabStore.tabs.count))")
+        .padding(.trailing, 8)
       }
-      // The visible scroller drew under the pills on macOS; trackpad scrolling still works.
-      .scrollIndicators(.never)
-      .fixedSize(horizontal: false, vertical: true)
+      .background(.bar)
+      Divider()
     }
   }
 
