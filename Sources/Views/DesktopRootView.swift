@@ -32,6 +32,7 @@ struct DesktopRootView: View {
   @State private var terminalFocusToken = 0
   @State private var tabStore = DesktopTabStore()
   @State private var isCommandPalettePresented = false
+  @State private var isCommandHeld = false
 
   private static let allGroups = "__all_groups__"
 
@@ -49,7 +50,9 @@ struct DesktopRootView: View {
       WindowTabConfigurationView(
         title: "Teleport Desktop",
         actionForEvent: shortcuts.action(for:),
-        onAction: performShortcut
+        onAction: performShortcut,
+        onTabNumber: { tabStore.selectTab(number: $0) },
+        onCommandHeld: { isCommandHeld = $0 }
       )
     )
     .overlay(alignment: .bottomTrailing) {
@@ -193,12 +196,13 @@ struct DesktopRootView: View {
         ScrollViewReader { proxy in
           ScrollView(.horizontal) {
             HStack(spacing: 6) {
-              ForEach(tabStore.tabs) { tab in
+              ForEach(Array(tabStore.tabs.enumerated()), id: \.element.id) { index, tab in
                 DesktopTabPillView(
                   title: tab.terminalStore.currentTitle,
                   icon: groupIcon(forNodeID: tab.terminalStore.connectedNodeID ?? tab.selectedNodeID),
                   isSelected: tab.id == tabStore.selectedTabID,
                   size: settings.tabSize,
+                  shortcutNumber: isCommandHeld && index < 9 ? index + 1 : nil,
                   onSelect: {
                     tabStore.selectTab(id: tab.id)
                   },
@@ -1583,6 +1587,8 @@ private struct DesktopTabPillView: View {
   let icon: String?
   let isSelected: Bool
   let size: TabSize
+  /// Shown as ⌘N in place of the close button while ⌘ is held.
+  let shortcutNumber: Int?
   let onSelect: () -> Void
   let onClose: () -> Void
 
@@ -1611,15 +1617,23 @@ private struct DesktopTabPillView: View {
       .onTapGesture(perform: onSelect)
       .accessibilityAddTraits(.isButton)
 
-      Image(systemName: "xmark")
-        .font(.caption2.weight(.bold))
-        .foregroundStyle(.secondary)
-        .padding(6)
-        .contentShape(Circle())
-        .onTapGesture(perform: onClose)
-        .accessibilityLabel("Close Tab")
-        .accessibilityAddTraits(.isButton)
-        .padding(.trailing, 6)
+      if let shortcutNumber {
+        Text("⌘\(shortcutNumber)")
+          .font(.caption2.weight(.semibold).monospacedDigit())
+          .foregroundStyle(.secondary)
+          .padding(.vertical, 6)
+          .padding(.trailing, 10)
+      } else {
+        Image(systemName: "xmark")
+          .font(.caption2.weight(.bold))
+          .foregroundStyle(.secondary)
+          .padding(6)
+          .contentShape(Circle())
+          .onTapGesture(perform: onClose)
+          .accessibilityLabel("Close Tab")
+          .accessibilityAddTraits(.isButton)
+          .padding(.trailing, 6)
+      }
     }
     .background(
       Capsule()

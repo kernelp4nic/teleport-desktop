@@ -60,6 +60,17 @@ final class DesktopTabStore {
     selectedTabID = id
   }
 
+  /// 1-based, matching ⌘1…⌘9.
+  @discardableResult
+  func selectTab(number: Int) -> Bool {
+    guard tabs.indices.contains(number - 1) else {
+      return false
+    }
+
+    selectedTabID = tabs[number - 1].id
+    return true
+  }
+
   /// Drops the tab on the target's slot, landing after it when moving right.
   func moveTab(id: UUID, onto targetID: UUID) {
     guard id != targetID,

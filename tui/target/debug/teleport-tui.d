@@ -1,0 +1,1 @@
+/Users/kernelp4nic/Devel/teleport-desktop/tui/target/debug/teleport-tui: /Users/kernelp4nic/Devel/teleport-desktop/tui/src/config.rs /Users/kernelp4nic/Devel/teleport-desktop/tui/src/main.rs /Users/kernelp4nic/Devel/teleport-desktop/tui/src/onepassword.rs /Users/kernelp4nic/Devel/teleport-desktop/tui/src/pty.rs /Users/kernelp4nic/Devel/teleport-desktop/tui/src/tsh.rs

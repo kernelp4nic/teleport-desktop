@@ -134,6 +134,19 @@ struct DesktopTabStoreTests {
   }
 
   @MainActor
+  @Test func selectTabByNumberIsOneBasedAndIgnoresMissingTabs() {
+    let store = DesktopTabStore()
+    let firstTab = store.openTab(windowState: DesktopWindowState.command("tsh ssh a", title: "a", summary: ""))
+    _ = store.openTab(windowState: DesktopWindowState.command("tsh ssh b", title: "b", summary: ""))
+
+    #expect(store.selectTab(number: 1))
+    #expect(store.selectedTabID == firstTab.id)
+    #expect(!store.selectTab(number: 3))
+    #expect(!store.selectTab(number: 0))
+    #expect(store.selectedTabID == firstTab.id)
+  }
+
+  @MainActor
   @Test func selectPreviousTabWrapsAround() {
     let store = DesktopTabStore()
     let firstTab = store.openTab(
