@@ -33,6 +33,7 @@ struct DesktopRootView: View {
   @State private var tabStore = DesktopTabStore()
   @State private var isCommandPalettePresented = false
   @State private var isCommandHeld = false
+  @State private var isNewTabPicker = false
 
   private static let allGroups = "__all_groups__"
 
@@ -823,8 +824,9 @@ struct DesktopRootView: View {
     return store.nodes.first { $0.id == nodeID }
   }
 
+  /// A tab without a node (local shell) must not borrow the sidebar's selection.
   private var detailNode: TeleportNode? {
-    activeTabNode ?? sidebarSelectedNode
+    activeTab == nil ? sidebarSelectedNode : activeTabNode
   }
 
   private var detailLogin: String? {
@@ -836,7 +838,7 @@ struct DesktopRootView: View {
   }
 
   private var actionNode: TeleportNode? {
-    activeTabNode ?? sidebarSelectedNode
+    detailNode
   }
 
   private var actionLogin: String? {
@@ -1086,8 +1088,9 @@ struct DesktopRootView: View {
 
   private func reconcileSelection() {
     if let activeTab {
-      if let selectedNodeID = activeTab.selectedNodeID,
-         store.nodes.contains(where: { $0.id == selectedNodeID }) {
+      // A local shell has no node and must stay that way.
+      guard let selectedNodeID = activeTab.selectedNodeID,
+            !store.nodes.contains(where: { $0.id == selectedNodeID }) else {
         return
       }
 
@@ -1158,6 +1161,8 @@ struct DesktopRootView: View {
       findNextSearchResult()
     case .findPrevious:
       findPreviousSearchResult()
+    case .newTab:
+      toggleCommandPalette(newTabPicker: true)
     case .closeTab:
       if let activeTab {
         closeTab(activeTab)
@@ -1181,7 +1186,7 @@ struct DesktopRootView: View {
 
   private func isAvailable(_ action: DesktopAction) -> Bool {
     switch action {
-    case .commandPalette, .refreshServers, .login, .collapseGroups:
+    case .commandPalette, .newTab, .refreshServers, .login, .collapseGroups:
       return true
     case .find, .findNext, .findPrevious, .closeTab, .previousTab, .nextTab, .moveTabLeft, .moveTabRight:
       return activeTab != nil
@@ -1208,20 +1213,52 @@ struct DesktopRootView: View {
     return true
   }
 
-  private func toggleCommandPalette() {
+  private func toggleCommandPalette(newTabPicker: Bool = false) {
     if isCommandPalettePresented {
       dismissCommandPalette()
     } else {
+      isNewTabPicker = newTabPicker
       isCommandPalettePresented = true
     }
   }
 
   private func dismissCommandPalette() {
     isCommandPalettePresented = false
+    isNewTabPicker = false
     requestTerminalFocus()
   }
 
+  /// ⌘T: a local shell first, then the servers connected most recently.
+  private var newTabItems: [CommandPaletteItem] {
+    let nodesByID = Dictionary(store.nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    let recents = library.recentNodeIDs(scopeKey: libraryScopeKey)
+      .compactMap { nodesByID[$0] }
+      .filter { resolvedLogin(for: $0) != nil }
+      .map { node in
+        CommandPaletteItem(
+          id: "host-\(node.id)",
+          title: library.name(for: node, scopeKey: libraryScopeKey),
+          subtitle: node.address,
+          icon: groupIcon(for: node) ?? "server.rack"
+        ) {
+          openNodeInApp(node: node)
+        }
+      }
+
+    let local = CommandPaletteItem(id: "local-shell", title: "Local Terminal", subtitle: nil, icon: "terminal") {
+      tabStore.openTab(windowState: .shell())
+      SoundFeedbackService.play(.action, settings: settings)
+      requestTerminalFocus()
+    }
+
+    return [local] + recents
+  }
+
   private var commandPaletteItems: [CommandPaletteItem] {
+    if isNewTabPicker {
+      return newTabItems
+    }
+
     let actionItems = DesktopAction.allCases
       .filter { $0 != .commandPalette && isAvailable($0) }
       .map { action in

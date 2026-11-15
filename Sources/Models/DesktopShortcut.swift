@@ -58,7 +58,7 @@ enum DesktopAction: String, CaseIterable, Identifiable {
   case commandPalette
   case refreshServers, login, collapseGroups
   case find, findNext, findPrevious
-  case closeTab, previousTab, nextTab, moveTabLeft, moveTabRight
+  case newTab, closeTab, previousTab, nextTab, moveTabLeft, moveTabRight
   case uploadFiles, downloadFile
 
   var id: String { rawValue }
@@ -72,6 +72,7 @@ enum DesktopAction: String, CaseIterable, Identifiable {
     case .find: return "Find in Terminal"
     case .findNext: return "Find Next"
     case .findPrevious: return "Find Previous"
+    case .newTab: return "New Tab"
     case .closeTab: return "Close Tab"
     case .previousTab: return "Previous Tab"
     case .nextTab: return "Next Tab"
@@ -91,6 +92,7 @@ enum DesktopAction: String, CaseIterable, Identifiable {
     case .find: return "magnifyingglass"
     case .findNext: return "chevron.down"
     case .findPrevious: return "chevron.up"
+    case .newTab: return "plus"
     case .closeTab: return "xmark"
     case .previousTab: return "arrow.left"
     case .nextTab: return "arrow.right"
@@ -110,6 +112,7 @@ enum DesktopAction: String, CaseIterable, Identifiable {
     case .find: return DesktopShortcut(key: "f", flags: .command)
     case .findNext: return DesktopShortcut(key: "g", flags: .command)
     case .findPrevious: return DesktopShortcut(key: "g", flags: [.command, .shift])
+    case .newTab: return DesktopShortcut(key: "t", flags: .command)
     case .closeTab: return DesktopShortcut(key: "w", flags: .command)
     case .previousTab: return DesktopShortcut(key: left, flags: [.command, .option])
     case .nextTab: return DesktopShortcut(key: right, flags: [.command, .option])

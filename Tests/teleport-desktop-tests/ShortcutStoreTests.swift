@@ -42,6 +42,21 @@ struct ShortcutStoreTests {
   }
 
   @MainActor
+  @Test func actionAddedAfterSaveGetsItsDefaultButClearsStick() throws {
+    let defaults = makeDefaults()
+    // A store saved before newTab existed: no known-actions list, newTab absent, closeTab cleared.
+    let legacy = [DesktopAction.commandPalette.rawValue: DesktopShortcut(key: "p", flags: [.command, .shift])]
+    defaults.set(try JSONEncoder().encode(legacy), forKey: "keyboardShortcuts.v1")
+
+    let migrated = ShortcutStore(defaults: defaults)
+    #expect(migrated.shortcut(for: .newTab)?.label == "⌘T")
+    #expect(migrated.shortcut(for: .closeTab) == nil)
+
+    migrated.assign(nil, to: .newTab)
+    #expect(ShortcutStore(defaults: defaults).shortcut(for: .newTab) == nil)
+  }
+
+  @MainActor
   @Test func resetRestoresDefaults() {
     let defaults = makeDefaults()
     let store = ShortcutStore(defaults: defaults)
