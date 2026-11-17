@@ -18,15 +18,18 @@ struct SettingsStoreTests {
     let settings = SettingsStore(defaults: defaults)
     #expect(settings.terminalFontSize == 13)
     #expect(settings.tabSize == .regular)
+    #expect(settings.tabShortcutHints == .afterDelay)
 
     settings.interfaceTheme = .dark
     settings.tabSize = .large
+    settings.tabShortcutHints = .off
     settings.terminalFontFamily = "Menlo"
     settings.terminalFontSize = 99
 
     let reloaded = SettingsStore(defaults: defaults)
     #expect(reloaded.interfaceTheme == .dark)
     #expect(reloaded.tabSize == .large)
+    #expect(reloaded.tabShortcutHints == .off)
     #expect(reloaded.terminalFontFamily == "Menlo")
     #expect(reloaded.terminalFontSize == 36)
   }

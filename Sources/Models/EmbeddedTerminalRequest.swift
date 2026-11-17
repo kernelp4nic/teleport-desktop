@@ -33,7 +33,7 @@ struct EmbeddedTerminalRequest: Codable, Equatable, Hashable, Identifiable {
   static func shell(
     shellPath: String = ShellBootstrap.shellPath(),
     environment: [String] = ShellBootstrap.environment(),
-    currentDirectory: String? = nil
+    currentDirectory: String? = NSHomeDirectory()
   ) -> EmbeddedTerminalRequest {
     EmbeddedTerminalRequest(
       executable: shellPath,

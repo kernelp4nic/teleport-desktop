@@ -34,6 +34,8 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
   let hostView = TerminalHostView()
   var onProcessTerminated: (@MainActor (Int32?) -> Void)?
   var onProcessOutput: (@MainActor () -> Void)?
+  /// Fires when the program inside sets the terminal title (OSC 0/2), e.g. the shell prompt or ssh.
+  var onTitleChange: (@MainActor (String) -> Void)?
   /// Receives every chunk of process output, decoded as UTF-8.
   var onOutputText: (@MainActor (String) -> Void)?
   private var lastRequestID: UUID?
@@ -97,7 +99,11 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
 
   func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
 
-  func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
+  func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
+    Task { @MainActor in
+      onTitleChange?(title)
+    }
+  }
 
   func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
 

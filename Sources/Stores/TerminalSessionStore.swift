@@ -36,6 +36,9 @@ final class TerminalSessionStore {
     terminalController.onProcessOutput = { [weak self] in
       self?.markConnectedIfNeeded()
     }
+    terminalController.onTitleChange = { [weak self] title in
+      self?.updateTitle(title)
+    }
     terminalController.onProcessTerminated = { [weak self] exitCode in
       self?.processTerminated(exitCode: exitCode)
     }
@@ -51,6 +54,14 @@ final class TerminalSessionStore {
     lastExitStatus = nil
     didNotifyConnectionEstablished = false
     terminalController.install(request, localEchoEnabled: connectedNodeID != nil)
+  }
+
+  /// Follows the title the running program reports; an empty one keeps the current title.
+  func updateTitle(_ title: String) {
+    let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !title.isEmpty {
+      currentTitle = title
+    }
   }
 
   func showSearch() {

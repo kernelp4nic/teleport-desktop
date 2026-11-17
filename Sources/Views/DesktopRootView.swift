@@ -25,6 +25,8 @@ struct DesktopRootView: View {
   @State private var remoteFilePath = "~/"
   @State private var renamedNodeID: String?
   @State private var renamedNodeName = ""
+  @State private var renamedTabID: UUID?
+  @State private var renamedTabName = ""
   @State private var editedGroupIconGroup: String?
   @State private var editedGroupIcon = ""
   @State private var hoveredHeaderGroup: String?
@@ -32,8 +34,21 @@ struct DesktopRootView: View {
   @State private var terminalFocusToken = 0
   @State private var tabStore = DesktopTabStore()
   @State private var isCommandPalettePresented = false
+  @State private var draggedTabID: UUID?
+  /// How far the cursor has dragged the tab from where it started.
+  @State private var dragOffset: CGFloat = 0
+  /// Slot the dragged tab would land in; neighbours slide aside to make room for it.
+  @State private var dragTarget: Int?
+  @State private var isSettling = false
+  @State private var tabWidths: [UUID: CGFloat] = [:]
+  private static let tabSpacing: CGFloat = 6
+  private static let tabStripSpace = "tabStrip"
   @State private var isCommandHeld = false
+  @State private var commandHoldTask: Task<Void, Never>?
   @State private var isNewTabPicker = false
+  @State private var commandStore = NodeCommandStore()
+  @State private var isRunCommandPresented = false
+  @State private var commandTargetIDs = Set<String>()
 
   private static let allGroups = "__all_groups__"
 
@@ -53,7 +68,7 @@ struct DesktopRootView: View {
         actionForEvent: shortcuts.action(for:),
         onAction: performShortcut,
         onTabNumber: { tabStore.selectTab(number: $0) },
-        onCommandHeld: { isCommandHeld = $0 }
+        onCommandHeld: setCommandHeld
       )
     )
     .overlay(alignment: .bottomTrailing) {
@@ -66,8 +81,10 @@ struct DesktopRootView: View {
     .overlay {
       if isCommandPalettePresented {
         CommandPaletteView(items: commandPaletteItems, onDismiss: dismissCommandPalette)
+          .transition(.opacity)
       }
     }
+    .animation(.easeOut(duration: 0.15), value: isCommandPalettePresented)
     .animation(.easeInOut(duration: 0.2), value: fileTransferToastMessage)
     .preferredColorScheme(settings.interfaceTheme.colorScheme)
     .toolbar {
@@ -146,6 +163,9 @@ struct DesktopRootView: View {
     .sheet(isPresented: $isLoginSheetPresented, onDismiss: loginSheetDismissed) {
       TeleportLoginSheet(store: store, settings: settings)
     }
+    .sheet(isPresented: $isRunCommandPresented) {
+      RunCommandView(store: commandStore, targets: commandTargets, selection: $commandTargetIDs)
+    }
     .sheet(item: $fileTransferDirection) { direction in
       FileTransferView(
         direction: direction,
@@ -175,6 +195,21 @@ struct DesktopRootView: View {
     } message: {
       Text("Leave the name empty to restore the original hostname.")
     }
+    .alert("Rename Tab", isPresented: Binding(
+      get: { renamedTabID != nil },
+      set: { if !$0 { renamedTabID = nil } }
+    )) {
+      TextField("Tab name", text: $renamedTabName)
+
+      Button("Cancel", role: .cancel) {}
+
+      Button("Rename") {
+        let name = renamedTabName.trimmingCharacters(in: .whitespacesAndNewlines)
+        tabStore.tabs.first { $0.id == renamedTabID }?.customTitle = name.isEmpty ? nil : name
+      }
+    } message: {
+      Text("Leave the name empty to restore the original title.")
+    }
     .alert("Group Icon", isPresented: groupIconAlertIsPresented) {
       TextField("Emoji or SF Symbol", text: $editedGroupIcon)
 
@@ -196,10 +231,10 @@ struct DesktopRootView: View {
       HStack(spacing: 8) {
         ScrollViewReader { proxy in
           ScrollView(.horizontal) {
-            HStack(spacing: 6) {
+            HStack(spacing: Self.tabSpacing) {
               ForEach(Array(tabStore.tabs.enumerated()), id: \.element.id) { index, tab in
                 DesktopTabPillView(
-                  title: tab.terminalStore.currentTitle,
+                  title: tab.displayTitle,
                   icon: groupIcon(forNodeID: tab.terminalStore.connectedNodeID ?? tab.selectedNodeID),
                   isSelected: tab.id == tabStore.selectedTabID,
                   size: settings.tabSize,
@@ -213,15 +248,26 @@ struct DesktopRootView: View {
                 )
                 .id(tab.id)
                 .frame(minWidth: 120, maxWidth: 220)
-                .help(tab.terminalStore.currentTitle)
-                .onDrag {
-                  NSItemProvider(object: tab.id.uuidString as NSString)
+                .help(tab.displayTitle)
+                .contextMenu {
+                  Button("Rename Tab…") {
+                    renamedTabID = tab.id
+                    renamedTabName = tab.displayTitle
+                  }
                 }
-                .onDrop(of: [.plainText], isTargeted: nil) { providers in
-                  moveDraggedTab(from: providers, onto: tab.id)
-                }
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { tabWidths[tab.id] = $0 }
+                .offset(x: draggedTabID == tab.id ? dragOffset : neighbourShift(forTabAt: index))
+                // The dragged tab must track the cursor exactly; only the settle at the end may animate.
+                .transaction(value: dragOffset) { if !isSettling { $0.animation = nil } }
+                .scaleEffect(draggedTabID == tab.id && !isSettling ? 1.04 : 1)
+                .shadow(color: .black.opacity(draggedTabID == tab.id && !isSettling ? 0.25 : 0), radius: 6, y: 2)
+                .zIndex(draggedTabID == tab.id ? 1 : 0)
+                .gesture(reorderGesture(for: tab))
+                .transition(.scale(scale: 0.85).combined(with: .opacity))
               }
             }
+            .coordinateSpace(name: Self.tabStripSpace)
+            .animation(.snappy(duration: 0.25), value: tabStore.tabs.count)
             .padding(.vertical, 6)
             .padding(.horizontal, 8)
           }
@@ -229,12 +275,13 @@ struct DesktopRootView: View {
           .fixedSize(horizontal: false, vertical: true)
           .onChange(of: tabStore.selectedTabID, initial: true) {
             if let selectedID = tabStore.selectedTabID {
-              proxy.scrollTo(selectedID)
+              withAnimation(.snappy(duration: 0.25)) { proxy.scrollTo(selectedID) }
             }
           }
           .onChange(of: tabStore.tabs.map(\.id)) {
-            if let selectedID = tabStore.selectedTabID {
-              proxy.scrollTo(selectedID)
+            // Not while dragging: the strip must stay put under the cursor.
+            if draggedTabID == nil, let selectedID = tabStore.selectedTabID {
+              withAnimation(.snappy(duration: 0.25)) { proxy.scrollTo(selectedID) }
             }
           }
         }
@@ -245,9 +292,9 @@ struct DesktopRootView: View {
               tabStore.selectTab(id: tab.id)
             } label: {
               if tab.id == tabStore.selectedTabID {
-                Label(tab.terminalStore.currentTitle, systemImage: "checkmark")
+                Label(tab.displayTitle, systemImage: "checkmark")
               } else {
-                Text(tab.terminalStore.currentTitle)
+                Text(tab.displayTitle)
               }
             }
           }
@@ -413,7 +460,12 @@ struct DesktopRootView: View {
                 connectableNodes(in: section).forEach { openNodeExternally($0) }
               }
               .disabled(connectableNodes(in: section).isEmpty)
-            } else if node(forSelection: selectedIDs) != nil {
+
+              Button("Run Command on Group (\(connectableNodes(in: section).count))…") {
+                presentRunCommand(preselecting: connectableNodes(in: section))
+              }
+              .disabled(connectableNodes(in: section).isEmpty)
+            } else if let node = node(forSelection: selectedIDs) {
               Button("Rename") {
                 prepareNodeRename(selectedIDs)
               }
@@ -427,6 +479,11 @@ struct DesktopRootView: View {
 
               Button("Open Externally") {
                 openSelectionExternally(selectedIDs)
+              }
+              .disabled(!canConnectSelection(selectedIDs))
+
+              Button("Run Command…") {
+                presentRunCommand(preselecting: [node])
               }
               .disabled(!canConnectSelection(selectedIDs))
             }
@@ -867,7 +924,7 @@ struct DesktopRootView: View {
       return library.name(for: detailNode, scopeKey: libraryScopeKey)
     }
 
-    return activeTab?.terminalStore.currentTitle ?? "Select a Server"
+    return activeTab?.displayTitle ?? "Select a Server"
   }
 
   private var detailSubtitle: String {
@@ -942,6 +999,29 @@ struct DesktopRootView: View {
     }
     SoundFeedbackService.play(.action, settings: settings)
     requestTerminalFocus()
+  }
+
+  private var commandTargets: [CommandTarget] {
+    store.nodes.compactMap { node in
+      resolvedLogin(for: node).map {
+        CommandTarget(
+          node: node,
+          name: library.name(for: node, scopeKey: libraryScopeKey),
+          login: $0,
+          icon: groupIcon(for: node)
+        )
+      }
+    }
+    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+  }
+
+  /// A run in progress keeps its own picks; otherwise the entry point (group, server) decides them.
+  private func presentRunCommand(preselecting nodes: [TeleportNode]? = nil) {
+    if let nodes, !commandStore.isRunning {
+      commandTargetIDs = Set(nodes.map(\.id))
+    }
+
+    isRunCommandPresented = true
   }
 
   private func presentLoginSheet() {
@@ -1172,13 +1252,15 @@ struct DesktopRootView: View {
     case .nextTab:
       tabStore.selectNextTab()
     case .moveTabLeft:
-      tabStore.moveSelectedTab(by: -1)
+      _ = withAnimation(.snappy(duration: 0.25)) { tabStore.moveSelectedTab(by: -1) }
     case .moveTabRight:
-      tabStore.moveSelectedTab(by: 1)
+      _ = withAnimation(.snappy(duration: 0.25)) { tabStore.moveSelectedTab(by: 1) }
     case .uploadFiles:
       prepareUpload()
     case .downloadFile:
       prepareDownload()
+    case .runCommand:
+      presentRunCommand()
     }
 
     return true
@@ -1186,7 +1268,7 @@ struct DesktopRootView: View {
 
   private func isAvailable(_ action: DesktopAction) -> Bool {
     switch action {
-    case .commandPalette, .newTab, .refreshServers, .login, .collapseGroups:
+    case .commandPalette, .newTab, .refreshServers, .login, .collapseGroups, .runCommand:
       return true
     case .find, .findNext, .findPrevious, .closeTab, .previousTab, .nextTab, .moveTabLeft, .moveTabRight:
       return activeTab != nil
@@ -1195,22 +1277,92 @@ struct DesktopRootView: View {
     }
   }
 
-  private func moveDraggedTab(from providers: [NSItemProvider], onto targetID: UUID) -> Bool {
-    guard let provider = providers.first else {
-      return false
+  /// Shows the ⌘N hints per the setting; the delayed mode keeps quick shortcuts like ⌘C from flashing them.
+  private func setCommandHeld(_ isHeld: Bool) {
+    guard isHeld, settings.tabShortcutHints != .off else {
+      commandHoldTask?.cancel()
+      commandHoldTask = nil
+      isCommandHeld = false
+      return
     }
 
-    _ = provider.loadObject(ofClass: NSString.self) { object, _ in
-      guard let idString = object as? NSString,
-            let draggedID = UUID(uuidString: idString as String) else {
-        return
-      }
-
-      Task { @MainActor in
-        tabStore.moveTab(id: draggedID, onto: targetID)
-      }
+    guard commandHoldTask == nil else { return }
+    if settings.tabShortcutHints == .immediately {
+      isCommandHeld = true
+      commandHoldTask = Task {}
+      return
     }
-    return true
+
+    commandHoldTask = Task {
+      try? await Task.sleep(for: .milliseconds(700))
+      guard !Task.isCancelled else { return }
+      isCommandHeld = true
+    }
+  }
+
+  /// Slot the dragged tab is over, and how far it travels to sit there (signed, in points).
+  /// Passing a neighbour's midpoint claims that neighbour's slot.
+  private func dragSlot() -> (index: Int, distance: CGFloat)? {
+    let tabs = tabStore.tabs
+    guard let draggedTabID, let from = tabs.firstIndex(where: { $0.id == draggedTabID }) else { return nil }
+    let direction = dragOffset > 0 ? 1 : -1
+    var index = from
+    var distance: CGFloat = 0
+    while tabs.indices.contains(index + direction),
+          let width = tabWidths[tabs[index + direction].id],
+          abs(dragOffset) > abs(distance) + (width + Self.tabSpacing) / 2 {
+      distance += (width + Self.tabSpacing) * CGFloat(direction)
+      index += direction
+    }
+    return (index, distance)
+  }
+
+  /// Tabs between the dragged tab's origin and its target slot slide one tab-width out of the way.
+  private func neighbourShift(forTabAt index: Int) -> CGFloat {
+    guard let draggedTabID, let dragTarget,
+          let from = tabStore.tabs.firstIndex(where: { $0.id == draggedTabID }),
+          let width = tabWidths[draggedTabID] else { return 0 }
+    let step = width + Self.tabSpacing
+    if dragTarget > from, index > from, index <= dragTarget { return -step }
+    if dragTarget < from, index < from, index >= dragTarget { return step }
+    return 0
+  }
+
+  /// The tab follows the cursor while neighbours slide aside; the array is only reordered once it has settled.
+  private func reorderGesture(for tab: DesktopTab) -> some Gesture {
+    DragGesture(minimumDistance: 5, coordinateSpace: .named(Self.tabStripSpace))
+      .onChanged { value in
+        guard !isSettling else { return }
+        if draggedTabID == nil {
+          dragTarget = tabStore.tabs.firstIndex { $0.id == tab.id }
+          withAnimation(.snappy(duration: 0.15)) { draggedTabID = tab.id }
+        }
+        dragOffset = value.translation.width
+
+        if let slot = dragSlot(), slot.index != dragTarget {
+          withAnimation(.snappy(duration: 0.22)) { dragTarget = slot.index }
+        }
+      }
+      .onEnded { _ in
+        guard !isSettling, let id = draggedTabID, let slot = dragSlot() else { return }
+        let targetID = tabStore.tabs[slot.index].id
+
+        withAnimation(.snappy(duration: 0.2), completionCriteria: .logicallyComplete) {
+          isSettling = true
+          dragOffset = slot.distance
+        } completion: {
+          // Every offset now equals the final layout, so swapping the order is invisible.
+          var transaction = Transaction()
+          transaction.disablesAnimations = true
+          withTransaction(transaction) {
+            tabStore.moveTab(id: id, onto: targetID)
+            draggedTabID = nil
+            dragTarget = nil
+            dragOffset = 0
+            isSettling = false
+          }
+        }
+      }
   }
 
   private func toggleCommandPalette(newTabPicker: Bool = false) {
@@ -1629,6 +1781,8 @@ private struct DesktopTabPillView: View {
   let onSelect: () -> Void
   let onClose: () -> Void
 
+  @State private var isHovered = false
+
   var body: some View {
     HStack(spacing: 6) {
       // Taps instead of Buttons: on macOS a Button swallows the mouse drag, so tabs could not be reordered.
@@ -1660,6 +1814,7 @@ private struct DesktopTabPillView: View {
           .foregroundStyle(.secondary)
           .padding(.vertical, 6)
           .padding(.trailing, 10)
+          .transition(.opacity)
       } else {
         Image(systemName: "xmark")
           .font(.caption2.weight(.bold))
@@ -1670,22 +1825,24 @@ private struct DesktopTabPillView: View {
           .accessibilityLabel("Close Tab")
           .accessibilityAddTraits(.isButton)
           .padding(.trailing, 6)
+          .transition(.opacity)
       }
     }
     .background(
       Capsule()
-        .fill(isSelected ? AnyShapeStyle(.quinary) : AnyShapeStyle(Color.clear))
+        .fill(Color.primary.opacity(isSelected ? 0.07 : isHovered ? 0.04 : 0))
     )
     .overlay(
       Capsule()
-        .strokeBorder(
-          isSelected ? AnyShapeStyle(.quaternary) : AnyShapeStyle(Color.clear),
-          lineWidth: 1
-        )
+        .strokeBorder(Color.primary.opacity(isSelected ? 0.12 : 0), lineWidth: 1)
     )
     .overlay {
       MiddleClickView(action: onClose)
     }
+    .onHover { isHovered = $0 }
+    .animation(.easeOut(duration: 0.15), value: isHovered)
+    .animation(.snappy(duration: 0.2), value: isSelected)
+    .animation(.easeOut(duration: 0.15), value: shortcutNumber)
   }
 }
 

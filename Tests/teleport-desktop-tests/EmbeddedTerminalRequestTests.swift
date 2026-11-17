@@ -13,6 +13,7 @@ struct EmbeddedTerminalRequestTests {
     #expect(request.args == ["-l"])
     #expect(request.execName == "-zsh")
     #expect(request.title == "Local Shell")
+    #expect(request.currentDirectory == NSHomeDirectory())
   }
 
   @Test func commandRequestWrapsTeleportCommandInBootstrapShell() {

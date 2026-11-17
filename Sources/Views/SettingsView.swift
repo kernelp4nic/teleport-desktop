@@ -301,6 +301,14 @@ struct SettingsView: View {
           .labelsHidden()
           .frame(width: 200)
         }
+        Divider()
+        row("Tab shortcut hints", "When ⌘1…⌘9 show on the tabs, in place of the close button.") {
+          Picker("Tab shortcut hints", selection: $settings.tabShortcutHints) {
+            ForEach(TabShortcutHints.allCases) { Text($0.title).tag($0) }
+          }
+          .labelsHidden()
+          .frame(width: 200)
+        }
       }
       card {
         Text("Terminal Font")

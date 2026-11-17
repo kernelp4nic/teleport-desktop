@@ -60,6 +60,17 @@ struct TerminalSessionStoreTests {
   }
 
   @MainActor
+  @Test func terminalTitleUpdatesTabTitleAndIgnoresEmpty() {
+    let store = TerminalSessionStore(windowState: .shell())
+
+    store.terminalController.onTitleChange?("ec2-user@host:~")
+    #expect(store.currentTitle == "ec2-user@host:~")
+
+    store.terminalController.onTitleChange?("  ")
+    #expect(store.currentTitle == "ec2-user@host:~")
+  }
+
+  @MainActor
   @Test func disconnectedOrIdleSessionsDoNotFireConnectionEstablishedCallback() {
     let store = TerminalSessionStore(windowState: .shell())
     var callbackCount = 0

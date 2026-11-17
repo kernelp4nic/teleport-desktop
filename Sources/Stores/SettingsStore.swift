@@ -26,6 +26,7 @@ final class SettingsStore {
     static let onePasswordAccount = "onePasswordAccount"
     static let interfaceTheme = "interfaceTheme"
     static let tabSize = "tabSize"
+    static let tabShortcutHints = "tabShortcutHints"
     static let terminalFontFamily = "terminalFontFamily"
     static let terminalFontSize = "terminalFontSize"
   }
@@ -77,6 +78,12 @@ final class SettingsStore {
   var tabSize: TabSize {
     didSet {
       defaults.set(tabSize.rawValue, forKey: Keys.tabSize)
+    }
+  }
+
+  var tabShortcutHints: TabShortcutHints {
+    didSet {
+      defaults.set(tabShortcutHints.rawValue, forKey: Keys.tabShortcutHints)
     }
   }
 
@@ -171,6 +178,7 @@ final class SettingsStore {
       ?? TerminalApplication.systemDefault.rawValue
     interfaceTheme = InterfaceTheme(rawValue: defaults.string(forKey: Keys.interfaceTheme) ?? "") ?? .system
     tabSize = TabSize(rawValue: defaults.string(forKey: Keys.tabSize) ?? "") ?? .regular
+    tabShortcutHints = TabShortcutHints(rawValue: defaults.string(forKey: Keys.tabShortcutHints) ?? "") ?? .afterDelay
     terminalFontFamily = defaults.string(forKey: Keys.terminalFontFamily) ?? ""
     terminalFontSize = defaults.object(forKey: Keys.terminalFontSize) == nil
       ? Self.defaultTerminalFontSize

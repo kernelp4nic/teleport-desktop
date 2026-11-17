@@ -60,6 +60,7 @@ enum DesktopAction: String, CaseIterable, Identifiable {
   case find, findNext, findPrevious
   case newTab, closeTab, previousTab, nextTab, moveTabLeft, moveTabRight
   case uploadFiles, downloadFile
+  case runCommand
 
   var id: String { rawValue }
 
@@ -80,6 +81,7 @@ enum DesktopAction: String, CaseIterable, Identifiable {
     case .moveTabRight: return "Move Tab Right"
     case .uploadFiles: return "Upload Files"
     case .downloadFile: return "Download File"
+    case .runCommand: return "Run Command on Servers…"
     }
   }
 
@@ -100,6 +102,7 @@ enum DesktopAction: String, CaseIterable, Identifiable {
     case .moveTabRight: return "arrow.right.to.line"
     case .uploadFiles: return "arrow.up.to.line"
     case .downloadFile: return "arrow.down.to.line"
+    case .runCommand: return "terminal.fill"
     }
   }
 
@@ -118,7 +121,7 @@ enum DesktopAction: String, CaseIterable, Identifiable {
     case .nextTab: return DesktopShortcut(key: right, flags: [.command, .option])
     case .moveTabLeft: return DesktopShortcut(key: left, flags: [.control, .shift])
     case .moveTabRight: return DesktopShortcut(key: right, flags: [.control, .shift])
-    case .refreshServers, .login, .collapseGroups, .uploadFiles, .downloadFile: return nil
+    case .refreshServers, .login, .collapseGroups, .uploadFiles, .downloadFile, .runCommand: return nil
     }
   }
 }

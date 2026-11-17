@@ -52,3 +52,18 @@ enum TabSize: String, CaseIterable, Identifiable {
     }
   }
 }
+
+/// When the ⌘1…⌘9 numbers replace the close button on the tabs.
+enum TabShortcutHints: String, CaseIterable, Identifiable {
+  case off, immediately, afterDelay
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .off: return "Never"
+    case .immediately: return "As soon as ⌘ is pressed"
+    case .afterDelay: return "After holding ⌘"
+    }
+  }
+}
