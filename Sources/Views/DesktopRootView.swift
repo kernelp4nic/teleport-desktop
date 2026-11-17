@@ -48,6 +48,7 @@ struct DesktopRootView: View {
   @State private var isNewTabPicker = false
   @State private var commandStore = NodeCommandStore()
   @State private var isRunCommandPresented = false
+  @State private var isNotesPresented = false
   @State private var commandTargetIDs = Set<String>()
 
   private static let allGroups = "__all_groups__"
@@ -60,6 +61,10 @@ struct DesktopRootView: View {
       VStack(spacing: 0) {
         sessionTabStrip
         detail
+      }
+      .inspector(isPresented: $isNotesPresented) {
+        NotesPanelView(onRun: activeTab.map { tab in { tab.terminalStore.terminalController.sendInput($0) } })
+          .inspectorColumnWidth(min: 260, ideal: 340, max: 700)
       }
     }
     .background(
@@ -111,6 +116,13 @@ struct DesktopRootView: View {
         } label: {
           Label("Login", systemImage: "person.badge.key")
         }
+
+        Button {
+          isNotesPresented.toggle()
+        } label: {
+          Label("Notes", systemImage: "sidebar.right")
+        }
+        .help("Markdown notes")
 
         Button {
           showTerminalSearch()
