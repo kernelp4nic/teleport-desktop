@@ -4,25 +4,39 @@ import SwiftUI
 /// Right-hand markdown scratchpad: write notes, then run fenced code blocks in the active terminal.
 struct NotesPanelView: View {
   @AppStorage("notesMarkdown") private var notes = ""
+  @AppStorage("notesTheme") private var themeID = NotesTheme.system.id
   @State private var isEditing = true
+  @Environment(\.colorScheme) private var systemScheme
 
   /// Sends text to the active terminal; nil when there is no session.
   let onRun: ((String) -> Void)?
 
+  private var theme: NotesTheme { .named(themeID) }
+
   var body: some View {
     VStack(spacing: 0) {
-      Picker("Mode", selection: $isEditing) {
-        Text("Edit").tag(true)
-        Text("Preview").tag(false)
+      HStack {
+        Picker("Mode", selection: $isEditing) {
+          Text("Edit").tag(true)
+          Text("Preview").tag(false)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+
+        Picker("Theme", selection: $themeID) {
+          ForEach(NotesTheme.all) { Text($0.name).tag($0.id) }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .fixedSize()
+        .help("Colour theme")
       }
-      .pickerStyle(.segmented)
-      .labelsHidden()
       .padding(8)
 
       Divider()
 
       if isEditing {
-        MarkdownEditor(text: $notes)
+        MarkdownEditor(text: $notes, theme: theme)
       } else {
         ScrollView {
           VStack(alignment: .leading, spacing: 10) {
@@ -30,7 +44,7 @@ struct NotesPanelView: View {
             ForEach(Array(segments.enumerated()), id: \.offset) { offset, segment in
               switch segment {
               case .text(let text):
-                ProseView(text: text)
+                ProseView(text: text, theme: theme)
               case .code(let code):
                 let index = segments[..<offset].filter { if case .code = $0 { true } else { false } }.count
                 CodeBlockView(
@@ -38,6 +52,7 @@ struct NotesPanelView: View {
                     get: { code },
                     set: { notes = Self.replacingCode(at: index, with: $0, in: notes) }
                   ),
+                  theme: theme,
                   onRun: onRun
                 )
               }
@@ -54,6 +69,9 @@ struct NotesPanelView: View {
         }
       }
     }
+    .foregroundStyle(Color(nsColor: theme.foreground))
+    .background(Color(nsColor: theme.background))
+    .environment(\.colorScheme, theme.dark.map { $0 ? .dark : .light } ?? systemScheme)
   }
 
   enum Segment: Equatable {
@@ -122,6 +140,7 @@ struct NotesPanelView: View {
 // shortcut: headings + inline marks only (no lists/tables), upgrade to a block renderer if needed.
 private struct ProseView: View {
   let text: String
+  let theme: NotesTheme
 
   var body: some View {
     VStack(alignment: .leading, spacing: 2) {
@@ -129,10 +148,10 @@ private struct ProseView: View {
         if let heading = Self.heading(line) {
           Text(heading.text)
             .font(heading.level == 1 ? .title2.bold() : heading.level == 2 ? .title3.bold() : .headline)
-            .foregroundStyle(.purple)
+            .foregroundStyle(Color(nsColor: theme.keyword))
             .padding(.top, 4)
         } else {
-          Text(Self.inline(line.isEmpty ? " " : String(line)))
+          Text(Self.inline(line.isEmpty ? " " : String(line), codeColor: Color(nsColor: theme.orange)))
         }
       }
     }
@@ -146,11 +165,11 @@ private struct ProseView: View {
     return (level, line.dropFirst(level + 1).trimmingCharacters(in: .whitespaces))
   }
 
-  private static func inline(_ text: String) -> AttributedString {
+  private static func inline(_ text: String, codeColor: Color) -> AttributedString {
     let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
     var attributed = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
     for run in attributed.runs where run.inlinePresentationIntent?.contains(.code) == true {
-      attributed[run.range].foregroundColor = .orange
+      attributed[run.range].foregroundColor = codeColor
     }
     return attributed
   }
@@ -159,12 +178,13 @@ private struct ProseView: View {
 /// Fenced code block: highlighted editable box with copy and run buttons.
 private struct CodeBlockView: View {
   @Binding var code: String
+  let theme: NotesTheme
   let onRun: ((String) -> Void)?
   @State private var copied = false
 
   var body: some View {
     HStack(alignment: .top, spacing: 8) {
-      CodeEditor(text: $code)
+      CodeEditor(text: $code, theme: theme)
         .frame(maxWidth: .infinity, alignment: .leading)
 
       HStack(spacing: 10) {
@@ -192,22 +212,23 @@ private struct CodeBlockView: View {
       .buttonStyle(.borderless)
     }
     .padding(8)
-    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+    .background(Color(nsColor: theme.foreground).opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
   }
 }
 
 // MARK: - Highlighting
 
-private struct Rule {
+// KeyPath<NotesTheme, NSColor> isn't checked as Sendable; rules are immutable.
+private struct Rule: @unchecked Sendable {
   let regex: NSRegularExpression
-  let color: NSColor
+  let color: KeyPath<NotesTheme, NSColor>
   let weight: NSFont.Weight
   /// Rules applied again inside each match (code inside a fence).
   let inner: [Rule]
 
   init(
     _ pattern: String,
-    _ color: NSColor,
+    _ color: KeyPath<NotesTheme, NSColor>,
     _ weight: NSFont.Weight = .regular,
     inner: [Rule] = []
   ) {
@@ -226,45 +247,45 @@ private enum Highlighter {
   /// Later rules override earlier ones.
   // shortcut: generic regex rules shared by shell/SQL/Clojure, not a parser; swap for Lambda's tree-sitter if accuracy matters.
   static let code: [Rule] = [
-    Rule(#"(?<![\w-])--?[A-Za-z][\w-]*"#, .systemTeal),
-    Rule(#"\b\d+(?:\.\d+)?\b"#, .systemOrange),
-    Rule(#"\$\{?[A-Za-z_]\w*\}?|\$[@#?!*0-9]|(?<![\w:]):[A-Za-z][\w?!./-]*"#, .systemCyan),
+    Rule(#"(?<![\w-])--?[A-Za-z][\w-]*"#, \.cyan),
+    Rule(#"\b\d+(?:\.\d+)?\b"#, \.orange),
+    Rule(#"\$\{?[A-Za-z_]\w*\}?|\$[@#?!*0-9]|(?<![\w:]):[A-Za-z][\w?!./-]*"#, \.blue),
     Rule(
       #"\b(?:sudo|docker|echo|if|then|else|elif|fi|for|in|do|done|while|case|esac|export|local|read|set|return|exit|"#
         + #"function|java|ssh|cd|ls|cat|grep|chmod|tee|bash|ALTER|ROLE|WITH|PASSWORD|UPDATE|SET|SELECT|FROM|WHERE|"#
         + #"INSERT|INTO|DELETE|CREATE|DROP|TABLE|defn-?|def|let|fn|ns|require|comment|when|cond)\b"#,
-      .systemPurple, .semibold),
-    Rule(#""(?:[^"\\\n]|\\.)*"|'[^'\n]*'"#, .systemGreen),
-    Rule(#"(?:^|(?<=\s))(?:#|;;|--\s|//).*$"#, .systemGray),
+      \.keyword, .semibold),
+    Rule(#""(?:[^"\\\n]|\\.)*"|'[^'\n]*'"#, \.string),
+    Rule(#"(?:^|(?<=\s))(?:#|;;|--\s|//).*$"#, \.comment),
   ]
 
   static let markdown: [Rule] = [
-    Rule(#"^\s*(?:[-*+]|\d+\.)\s"#, .systemPink),
-    Rule(#"\[[^\]\n]+\]\([^)\n]+\)"#, .systemBlue),
-    Rule(#"\*\*[^*\n]+\*\*"#, .systemYellow, .bold),
-    Rule(#"`[^`\n]+`"#, .systemOrange),
-    Rule(#"^#{1,6}\s.*$"#, .systemPurple, .bold),
+    Rule(#"^\s*(?:[-*+]|\d+\.)\s"#, \.magenta),
+    Rule(#"\[[^\]\n]+\]\([^)\n]+\)"#, \.blue),
+    Rule(#"\*\*[^*\n]+\*\*"#, \.yellow, .bold),
+    Rule(#"`[^`\n]+`"#, \.orange),
+    Rule(#"^#{1,6}\s.*$"#, \.keyword, .bold),
     // Code bodies get code colours; only the fence lines are green.
-    Rule(#"^[ \t]*```[\s\S]*?(?:^[ \t]*```|\z)"#, .textColor, inner: code),
-    Rule(#"^[ \t]*```.*$"#, .systemGreen),
+    Rule(#"^[ \t]*```[\s\S]*?(?:^[ \t]*```|\z)"#, \.foreground, inner: code),
+    Rule(#"^[ \t]*```.*$"#, \.green),
   ]
 
-  static func apply(_ rules: [Rule], to storage: NSTextStorage, in range: NSRange) {
+  static func apply(_ rules: [Rule], theme: NotesTheme, to storage: NSTextStorage, in range: NSRange) {
     for rule in rules {
       rule.regex.enumerateMatches(in: storage.string, range: range) { match, _, _ in
         guard let found = match?.range else { return }
-        storage.addAttributes([.foregroundColor: rule.color, .font: font(rule.weight)], range: found)
-        apply(rule.inner, to: storage, in: found)
+        storage.addAttributes([.foregroundColor: theme[keyPath: rule.color], .font: font(rule.weight)], range: found)
+        apply(rule.inner, theme: theme, to: storage, in: found)
       }
     }
   }
 
-  static func highlight(_ textView: NSTextView, rules: [Rule]) {
+  static func highlight(_ textView: NSTextView, rules: [Rule], theme: NotesTheme) {
     guard let storage = textView.textStorage else { return }
     let full = NSRange(location: 0, length: storage.length)
     storage.beginEditing()
-    storage.setAttributes([.font: font(.regular), .foregroundColor: NSColor.textColor], range: full)
-    apply(rules, to: storage, in: full)
+    storage.setAttributes([.font: font(.regular), .foregroundColor: theme.foreground], range: full)
+    apply(rules, theme: theme, to: storage, in: full)
     storage.endEditing()
   }
 }
@@ -273,16 +294,18 @@ private enum Highlighter {
 private final class HighlightingCoordinator: NSObject, NSTextViewDelegate {
   var text: Binding<String>
   let rules: [Rule]
+  var theme: NotesTheme
 
-  init(text: Binding<String>, rules: [Rule]) {
+  init(text: Binding<String>, rules: [Rule], theme: NotesTheme) {
     self.text = text
     self.rules = rules
+    self.theme = theme
   }
 
   func textDidChange(_ notification: Notification) {
     guard let textView = notification.object as? NSTextView else { return }
     text.wrappedValue = textView.string
-    Highlighter.highlight(textView, rules: rules)
+    Highlighter.highlight(textView, rules: rules, theme: theme)
   }
 
   func configure(_ textView: NSTextView, text: String) {
@@ -296,23 +319,30 @@ private final class HighlightingCoordinator: NSObject, NSTextViewDelegate {
     textView.isAutomaticSpellingCorrectionEnabled = false
     textView.font = Highlighter.font(.regular)
     textView.string = text
-    Highlighter.highlight(textView, rules: rules)
+    restyle(textView)
   }
 
-  func sync(_ textView: NSTextView, text: String) {
-    if textView.string != text {
-      textView.string = text
-      Highlighter.highlight(textView, rules: rules)
-    }
+  func sync(_ textView: NSTextView, text: String, theme: NotesTheme) {
+    let themeChanged = theme.id != self.theme.id
+    self.theme = theme
+    if textView.string != text { textView.string = text }
+    if themeChanged || textView.string != text { restyle(textView) }
+  }
+
+  private func restyle(_ textView: NSTextView) {
+    textView.selectedTextAttributes = [.backgroundColor: theme.selection]
+    textView.insertionPointColor = theme.foreground
+    Highlighter.highlight(textView, rules: rules, theme: theme)
   }
 }
 
 /// Scrolling editor for the whole notes text, markdown-coloured.
 private struct MarkdownEditor: NSViewRepresentable {
   @Binding var text: String
+  let theme: NotesTheme
 
   func makeCoordinator() -> HighlightingCoordinator {
-    HighlightingCoordinator(text: $text, rules: Highlighter.markdown)
+    HighlightingCoordinator(text: $text, rules: Highlighter.markdown, theme: theme)
   }
 
   func makeNSView(context: Context) -> NSScrollView {
@@ -326,16 +356,17 @@ private struct MarkdownEditor: NSViewRepresentable {
 
   func updateNSView(_ scrollView: NSScrollView, context: Context) {
     context.coordinator.text = $text
-    context.coordinator.sync(scrollView.documentView as! NSTextView, text: text)
+    context.coordinator.sync(scrollView.documentView as! NSTextView, text: text, theme: theme)
   }
 }
 
 /// Self-sizing editor for one code block, code-coloured.
 private struct CodeEditor: NSViewRepresentable {
   @Binding var text: String
+  let theme: NotesTheme
 
   func makeCoordinator() -> HighlightingCoordinator {
-    HighlightingCoordinator(text: $text, rules: Highlighter.code)
+    HighlightingCoordinator(text: $text, rules: Highlighter.code, theme: theme)
   }
 
   func makeNSView(context: Context) -> NSTextView {
@@ -357,7 +388,7 @@ private struct CodeEditor: NSViewRepresentable {
 
   func updateNSView(_ textView: NSTextView, context: Context) {
     context.coordinator.text = $text
-    context.coordinator.sync(textView, text: text)
+    context.coordinator.sync(textView, text: text, theme: theme)
   }
 
   /// Sizes like `Text`: at most its unwrapped width, wrapping at whatever width the parent offers.
