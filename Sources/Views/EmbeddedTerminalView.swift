@@ -5,6 +5,8 @@ import SwiftUI
 struct EmbeddedTerminalView: NSViewRepresentable {
   let sessionStore: TerminalSessionStore
   let focusToken: Int
+  /// Only the focused pane of a split takes keyboard focus when the token changes.
+  var isFocused = true
   let scrollbackLines: Int
   let localEchoEnabled: Bool
   let fontFamily: String
@@ -16,7 +18,9 @@ struct EmbeddedTerminalView: NSViewRepresentable {
     sessionStore.terminalController.setScrollbackLines(scrollbackLines)
     sessionStore.terminalController.setFont(family: fontFamily, size: fontSize)
     containerView.attach(hostView: sessionStore.terminalController.hostView)
-    containerView.focusTerminalIfNeeded(using: focusToken)
+    if isFocused {
+      containerView.focusTerminalIfNeeded(using: focusToken)
+    }
     return containerView
   }
 
@@ -25,7 +29,9 @@ struct EmbeddedTerminalView: NSViewRepresentable {
     sessionStore.terminalController.setScrollbackLines(scrollbackLines)
     sessionStore.terminalController.setFont(family: fontFamily, size: fontSize)
     nsView.attach(hostView: sessionStore.terminalController.hostView)
-    nsView.focusTerminalIfNeeded(using: focusToken)
+    if isFocused {
+      nsView.focusTerminalIfNeeded(using: focusToken)
+    }
   }
 }
 
@@ -38,10 +44,21 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
   var onTitleChange: (@MainActor (String) -> Void)?
   /// Receives every chunk of process output, decoded as UTF-8.
   var onOutputText: (@MainActor (String) -> Void)?
+  /// Fires when the terminal becomes first responder, e.g. after a click in a split pane.
+  var onFocus: (@MainActor () -> Void)?
+  /// Working directory the shell reports (OSC 7), so a split can open where the user is.
+  private(set) var currentDirectory: String?
   private var lastRequestID: UUID?
   private var didReportInitialOutput = false
   private var localEchoPreference = false
   private var supportsLocalEcho = false
+
+  override init() {
+    super.init()
+    hostView.onFocus = { [weak self] in
+      self?.onFocus?()
+    }
+  }
 
   func install(_ request: EmbeddedTerminalRequest, localEchoEnabled: Bool) {
     guard lastRequestID != request.id || hostView.terminalView == nil else {
@@ -105,7 +122,12 @@ final class TerminalProcessController: NSObject, @preconcurrency LocalProcessTer
     }
   }
 
-  func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+  func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
+    Task { @MainActor in
+      // OSC 7 sends a file:// URL; fall back to the raw string when it is not one.
+      currentDirectory = directory.map { URL(string: $0)?.path ?? $0 }
+    }
+  }
 
   func processTerminated(source: TerminalView, exitCode: Int32?) {
     let onProcessTerminated = onProcessTerminated
@@ -190,6 +212,19 @@ final class ObservedLocalProcessTerminalView: LocalProcessTerminalView {
   private var didReceiveOutput = false
   private var localEchoEnabled = false
   private var localEchoPredictor = LocalEchoPredictor()
+  private var redrawTask: Task<Void, Never>?
+
+  /// shortcut: SwiftTerm can lose a repaint (view detached or resizing) and leave the screen stale while the cursor
+  /// keeps moving; one full redraw after output settles heals it. Drop if the root cause is found.
+  private func scheduleFullRedraw() {
+    redrawTask?.cancel()
+    redrawTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: .milliseconds(100))
+      if !Task.isCancelled {
+        self?.needsDisplay = true
+      }
+    }
+  }
 
   func configureLocalEcho(enabled: Bool) {
     guard localEchoEnabled != enabled else { return }
@@ -223,6 +258,7 @@ final class ObservedLocalProcessTerminalView: LocalProcessTerminalView {
     }
 
     onOutput?(slice)
+    scheduleFullRedraw()
 
     guard !didReceiveOutput, !slice.isEmpty else {
       return
@@ -238,6 +274,21 @@ final class TerminalHostView: NSView {
   private var scrollbackLines = SettingsStore.defaultTerminalScrollbackLines
   private var terminalFont = NSFont.monospacedSystemFont(ofSize: SettingsStore.defaultTerminalFontSize, weight: .regular)
   private(set) var terminalView: ObservedLocalProcessTerminalView?
+  /// Fires when the terminal becomes first responder, e.g. after a click in a split pane.
+  var onFocus: (@MainActor () -> Void)?
+  private var responderObservation: NSKeyValueObservation?
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    terminalView?.needsDisplay = true
+    responderObservation = window?.observe(\.firstResponder) { [weak self] _, _ in
+      MainActor.assumeIsolated {
+        if let self, let terminalView = self.terminalView, self.window?.firstResponder === terminalView {
+          self.onFocus?()
+        }
+      }
+    }
+  }
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)

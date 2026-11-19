@@ -18,9 +18,9 @@ struct DesktopWindowState: Codable, Hashable, Identifiable {
     self.connectedNodeID = connectedNodeID
   }
 
-  static func shell() -> DesktopWindowState {
+  static func shell(currentDirectory: String = NSHomeDirectory()) -> DesktopWindowState {
     DesktopWindowState(
-      request: .shell(),
+      request: .shell(currentDirectory: currentDirectory),
       selectedNodeID: nil,
       connectedNodeID: nil
     )

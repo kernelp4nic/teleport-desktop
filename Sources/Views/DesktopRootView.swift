@@ -46,6 +46,8 @@ struct DesktopRootView: View {
   @State private var isCommandHeld = false
   @State private var commandHoldTask: Task<Void, Never>?
   @State private var isNewTabPicker = false
+  /// Set while the palette asks which node a new split pane should connect to.
+  @State private var pendingSplit: Axis?
   @State private var commandStore = NodeCommandStore()
   @State private var isRunCommandPresented = false
   @State private var isNotesPresented = false
@@ -624,19 +626,28 @@ struct DesktopRootView: View {
       }
 
       if let activeTab {
-        EmbeddedTerminalView(
-          sessionStore: activeTab.terminalStore,
-          focusToken: terminalFocusToken,
-          scrollbackLines: settings.terminalScrollbackLines,
-          localEchoEnabled: settings.localEchoEnabled,
-          fontFamily: settings.terminalFontFamily,
-          fontSize: settings.terminalFontSize
-        )
-          .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-          .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-              .strokeBorder(.quaternary, lineWidth: 1)
+        PaneLayoutView(layout: activeTab.layout) { pane in
+          let isFocused = pane === activeTab.focusedPane
+
+          EmbeddedTerminalView(
+            sessionStore: pane,
+            focusToken: terminalFocusToken,
+            isFocused: isFocused,
+            scrollbackLines: settings.terminalScrollbackLines,
+            localEchoEnabled: settings.localEchoEnabled,
+            fontFamily: settings.terminalFontFamily,
+            fontSize: settings.terminalFontSize
           )
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+              RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(
+                  isFocused && activeTab.panes.count > 1 ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.quaternary),
+                  lineWidth: 1
+                )
+            )
+            .frame(minWidth: 160, minHeight: 80)
+        }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else if store.isCheckingSession {
         VStack(spacing: 12) {
@@ -884,7 +895,8 @@ struct DesktopRootView: View {
       return nil
     }
 
-    let nodeID = activeTab.terminalStore.connectedNodeID ?? activeTab.selectedNodeID
+    let nodeID = activeTab.terminalStore.connectedNodeID
+      ?? (activeTab.panes.count == 1 ? activeTab.selectedNodeID : nil)
 
     guard let nodeID else {
       return nil
@@ -985,7 +997,8 @@ struct DesktopRootView: View {
     )
   }
 
-  private func openNodeInApp(node: TeleportNode) {
+  /// Opens a new tab, or a new pane next to the focused one when `split` is set.
+  private func openNodeInApp(node: TeleportNode, split: Axis? = nil) {
     guard let command = store.connectCommand(for: node, settings: settings) else {
       store.errorMessage = "Could not resolve an SSH login for \(node.hostname)."
       SoundFeedbackService.play(.error, settings: settings)
@@ -996,16 +1009,20 @@ struct DesktopRootView: View {
 
     let login = resolvedLogin(for: node) ?? "unknown"
     let scopeKey = libraryScopeKey
-    let tab = tabStore.openTab(
-      windowState: DesktopWindowState.command(
-        command,
-        title: "\(login)@\(library.name(for: node, scopeKey: libraryScopeKey))",
-        summary: "Running tsh ssh as \(login)",
-        selectedNodeID: node.id,
-        connectedNodeID: node.id
-      )
+    let windowState = DesktopWindowState.command(
+      command,
+      title: "\(login)@\(library.name(for: node, scopeKey: libraryScopeKey))",
+      summary: "Running tsh ssh as \(login)",
+      selectedNodeID: node.id,
+      connectedNodeID: node.id
     )
-    tab.terminalStore.onConnectionEstablished = { [library] in
+    let terminalStore: TerminalSessionStore
+    if let split, let activeTab {
+      terminalStore = activeTab.split(split, windowState: windowState)
+    } else {
+      terminalStore = tabStore.openTab(windowState: windowState).terminalStore
+    }
+    terminalStore.onConnectionEstablished = { [library] in
       library.recordRecent(nodeID: node.id, scopeKey: scopeKey)
       SoundFeedbackService.play(.connected, settings: settings)
     }
@@ -1257,8 +1274,23 @@ struct DesktopRootView: View {
       toggleCommandPalette(newTabPicker: true)
     case .closeTab:
       if let activeTab {
-        closeTab(activeTab)
+        if activeTab.closeFocusedPane() {
+          SoundFeedbackService.play(.dismissed, settings: settings)
+          requestTerminalFocus()
+        } else {
+          closeTab(activeTab)
+        }
       }
+    case .splitRight:
+      splitActiveTab(.horizontal)
+    case .splitDown:
+      splitActiveTab(.vertical)
+    case .previousPane:
+      activeTab?.focusPane(offset: -1)
+      requestTerminalFocus()
+    case .nextPane:
+      activeTab?.focusPane(offset: 1)
+      requestTerminalFocus()
     case .previousTab:
       tabStore.selectPreviousTab()
     case .nextTab:
@@ -1282,8 +1314,11 @@ struct DesktopRootView: View {
     switch action {
     case .commandPalette, .newTab, .refreshServers, .login, .collapseGroups, .runCommand:
       return true
-    case .find, .findNext, .findPrevious, .closeTab, .previousTab, .nextTab, .moveTabLeft, .moveTabRight:
+    case .find, .findNext, .findPrevious, .closeTab, .previousTab, .nextTab, .moveTabLeft, .moveTabRight,
+         .splitRight, .splitDown:
       return activeTab != nil
+    case .previousPane, .nextPane:
+      return (activeTab?.panes.count ?? 0) > 1
     case .uploadFiles, .downloadFile:
       return activeConnectionBadgeState == .connected
     }
@@ -1386,9 +1421,39 @@ struct DesktopRootView: View {
     }
   }
 
+  /// A local pane splits straight into a local shell in the same directory; a remote one asks which node to connect to.
+  private func splitActiveTab(_ axis: Axis) {
+    guard let activeTab else {
+      return
+    }
+
+    if activeTab.terminalStore.connectedNodeID == nil {
+      splitWithLocalShell(axis, currentDirectory: activeTab.terminalStore.terminalController.currentDirectory)
+    } else {
+      pendingSplit = axis
+      isNewTabPicker = false
+      isCommandPalettePresented = true
+    }
+  }
+
+  private func splitWithLocalShell(_ axis: Axis, currentDirectory: String? = nil) {
+    activeTab?.split(axis, windowState: .shell(currentDirectory: currentDirectory ?? NSHomeDirectory()))
+    SoundFeedbackService.play(.action, settings: settings)
+    requestTerminalFocus()
+  }
+
+  private func splitPickerItems(_ axis: Axis) -> [CommandPaletteItem] {
+    let local = CommandPaletteItem(id: "local-shell", title: "Local Terminal", subtitle: nil, icon: "terminal") {
+      splitWithLocalShell(axis)
+    }
+
+    return [local] + hostItems(split: axis)
+  }
+
   private func dismissCommandPalette() {
     isCommandPalettePresented = false
     isNewTabPicker = false
+    pendingSplit = nil
     requestTerminalFocus()
   }
 
@@ -1418,7 +1483,27 @@ struct DesktopRootView: View {
     return [local] + recents
   }
 
+  private func hostItems(split: Axis? = nil) -> [CommandPaletteItem] {
+    store.nodes
+      .filter { resolvedLogin(for: $0) != nil }
+      .sorted { library.name(for: $0, scopeKey: libraryScopeKey) < library.name(for: $1, scopeKey: libraryScopeKey) }
+      .map { node in
+        CommandPaletteItem(
+          id: "host-\(node.id)",
+          title: library.name(for: node, scopeKey: libraryScopeKey),
+          subtitle: node.address,
+          icon: groupIcon(for: node) ?? "server.rack"
+        ) {
+          openNodeInApp(node: node, split: split)
+        }
+      }
+  }
+
   private var commandPaletteItems: [CommandPaletteItem] {
+    if let pendingSplit {
+      return splitPickerItems(pendingSplit)
+    }
+
     if isNewTabPicker {
       return newTabItems
     }
@@ -1436,21 +1521,7 @@ struct DesktopRootView: View {
         }
       }
 
-    let hostItems = store.nodes
-      .filter { resolvedLogin(for: $0) != nil }
-      .sorted { library.name(for: $0, scopeKey: libraryScopeKey) < library.name(for: $1, scopeKey: libraryScopeKey) }
-      .map { node in
-        CommandPaletteItem(
-          id: "host-\(node.id)",
-          title: library.name(for: node, scopeKey: libraryScopeKey),
-          subtitle: node.address,
-          icon: groupIcon(for: node) ?? "server.rack"
-        ) {
-          openNodeInApp(node: node)
-        }
-      }
-
-    return actionItems + hostItems
+    return actionItems + hostItems()
   }
 
   private func requestTerminalFocus() {
