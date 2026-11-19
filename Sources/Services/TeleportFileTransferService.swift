@@ -32,13 +32,8 @@ struct TeleportFileTransferService: Sendable {
   ) throws -> TeleportFileTransferOperation {
     let remotePath = try Self.normalizedRemotePath(remotePath)
     let destination = "\(login)@\(hostname):\(remotePath)"
-    let jobs = localURLs.map { url in
-      let fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 1
-
-      return TeleportFileTransferOperation.Job(
-        arguments: ["scp", url.path, destination],
-        weight: Int64(max(fileSize, 1))
-      )
+    let jobs = localURLs.map {
+      TeleportFileTransferOperation.Job(arguments: ["scp", $0.path, destination])
     }
 
     return TeleportFileTransferOperation(jobs: jobs)
@@ -54,7 +49,7 @@ struct TeleportFileTransferService: Sendable {
     let arguments = ["\(login)@\(hostname):\(remotePath)", localDirectoryURL.path]
 
     return TeleportFileTransferOperation(
-      jobs: [.init(arguments: ["scp"] + arguments, weight: 1)]
+      jobs: [.init(arguments: ["scp"] + arguments)]
     )
   }
 
@@ -109,102 +104,143 @@ struct TeleportFileTransferService: Sendable {
 final class TeleportFileTransferOperation: @unchecked Sendable {
   struct Job: Sendable {
     let arguments: [String]
-    let weight: Int64
   }
+
+  enum Update: Sendable {
+    case progress(Double)
+    case failed(String)
+  }
+
+  /// Each job is its own `tsh scp` process (its own connection), so they run side by side.
+  static let maxConcurrentJobs = 4
 
   private let jobs: [Job]
   private let lock = NSLock()
   private var cancelled = false
-  private var process: Process?
+  private var processes: [Int: Process] = [:]
 
   init(jobs: [Job]) {
     self.jobs = jobs
   }
 
+  /// Runs every job (a failed job does not stop the others) and throws once all have finished.
   func run(
-    onProgress: @escaping @Sendable (Double) -> Void
+    onUpdate: @escaping @Sendable (Int, Update) -> Void
   ) async throws {
-    try await Task.detached { [self] in
-      let totalWeight = max(jobs.reduce(Int64(0)) { $0 + $1.weight }, 1)
-      var completedWeight: Int64 = 0
+    let failedCount = await withTaskGroup(of: Bool.self) { group in
+      var indices = jobs.indices.makeIterator()
+      var failedCount = 0
 
-      for job in jobs {
-        let process = Process()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        let completedFraction = Double(completedWeight) / Double(totalWeight)
-        let jobFraction = Double(job.weight) / Double(totalWeight)
-        let parser = TeleportFileTransferProgressParser { progress in
-          onProgress(completedFraction + (progress * jobFraction))
-        }
-
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["tsh"] + job.arguments
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-        process.environment = ProcessInfo.processInfo.environment.merging(
-          ["PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"]
-        ) { _, new in
-          new
-        }
-
-        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-          parser.consume(handle.availableData)
-        }
-
-        let shouldStart = lock.withLock {
-          guard !cancelled else {
-            return false
-          }
-
-          self.process = process
-          return true
-        }
-
-        guard shouldStart else {
-          throw TeleportFileTransferError.cancelled
-        }
-
-        defer {
-          stdoutPipe.fileHandleForReading.readabilityHandler = nil
-          lock.withLock {
-            self.process = nil
-          }
-        }
-
-        try process.run()
-        process.waitUntilExit()
-        parser.consume(stdoutPipe.fileHandleForReading.readDataToEndOfFile())
-
-        if lock.withLock({ cancelled }) {
-          throw TeleportFileTransferError.cancelled
-        }
-
-        guard process.terminationStatus == 0 else {
-          let errorData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-          let message = String(decoding: errorData, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-          throw TeleportFileTransferError.commandFailed(
-            message.isEmpty ? "Teleport could not transfer the file." : message
-          )
-        }
-
-        completedWeight += job.weight
-        onProgress(Double(completedWeight) / Double(totalWeight))
+      for _ in 0..<Self.maxConcurrentJobs {
+        guard let index = indices.next() else { break }
+        group.addTask { await self.runJob(index, onUpdate: onUpdate) }
       }
 
-      onProgress(1)
-    }.value
+      for await succeeded in group {
+        if !succeeded {
+          failedCount += 1
+        }
+
+        if let index = indices.next() {
+          group.addTask { await self.runJob(index, onUpdate: onUpdate) }
+        }
+      }
+
+      return failedCount
+    }
+
+    if lock.withLock({ cancelled }) {
+      throw TeleportFileTransferError.cancelled
+    }
+
+    if failedCount > 0 {
+      throw TeleportFileTransferError.commandFailed(
+        jobs.count == 1
+          ? "Teleport could not transfer the file."
+          : "\(failedCount) of \(jobs.count) files could not be transferred."
+      )
+    }
   }
 
   func cancel() {
-    let process = lock.withLock {
+    let running = lock.withLock {
       cancelled = true
-      return self.process
+      return Array(processes.values)
     }
 
-    process?.interrupt()
+    running.forEach { $0.interrupt() }
+  }
+
+  private func runJob(
+    _ index: Int,
+    onUpdate: @escaping @Sendable (Int, Update) -> Void
+  ) async -> Bool {
+    await Task.detached { [self] in
+      let process = Process()
+      let stdoutPipe = Pipe()
+      let stderrPipe = Pipe()
+      let parser = TeleportFileTransferProgressParser { onUpdate(index, .progress($0)) }
+
+      process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+      process.arguments = ["tsh"] + jobs[index].arguments
+      process.standardOutput = stdoutPipe
+      process.standardError = stderrPipe
+      process.environment = ProcessInfo.processInfo.environment.merging(
+        ["PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"]
+      ) { _, new in
+        new
+      }
+
+      stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+        parser.consume(handle.availableData)
+      }
+
+      let shouldStart = lock.withLock {
+        guard !cancelled else {
+          return false
+        }
+
+        processes[index] = process
+        return true
+      }
+
+      guard shouldStart else {
+        return true
+      }
+
+      defer {
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        lock.withLock {
+          processes[index] = nil
+        }
+      }
+
+      do {
+        try process.run()
+      } catch {
+        onUpdate(index, .failed(error.localizedDescription))
+        return false
+      }
+
+      process.waitUntilExit()
+      parser.consume(stdoutPipe.fileHandleForReading.readDataToEndOfFile())
+
+      if lock.withLock({ cancelled }) {
+        return true
+      }
+
+      guard process.terminationStatus == 0 else {
+        let errorData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        let message = String(decoding: errorData, as: UTF8.self)
+          .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        onUpdate(index, .failed(message.isEmpty ? "Teleport could not transfer the file." : message))
+        return false
+      }
+
+      onUpdate(index, .progress(1))
+      return true
+    }.value
   }
 }
 

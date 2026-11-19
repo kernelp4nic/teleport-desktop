@@ -19,6 +19,8 @@ struct DesktopRootView: View {
   @State private var fileTransferMessage: String?
   @State private var fileTransferOperation: TeleportFileTransferOperation?
   @State private var fileTransferProgress: Double?
+  @State private var fileProgress: [Int: Double] = [:]
+  @State private var fileErrors: [Int: String] = [:]
   @State private var fileTransferToastMessage: String?
   @State private var isTransferringFile = false
   @State private var isLoginSheetPresented = false
@@ -186,8 +188,12 @@ struct DesktopRootView: View {
         isTransferring: isTransferringFile,
         message: fileTransferMessage,
         progress: fileTransferProgress,
+        fileProgress: fileProgress,
+        fileErrors: fileErrors,
         onCancel: cancelFileTransfer,
         onChooseFiles: chooseUploadFiles,
+        onDropFiles: addUploadURLs,
+        onRemoveFile: removeUploadURL,
         onChooseDownloadDirectory: downloadFile,
         onUpload: uploadFiles
       )
@@ -1472,13 +1478,14 @@ struct DesktopRootView: View {
   private func prepareUpload() {
     remoteFilePath = "~/"
     uploadURLs = []
+    resetFileProgress()
     fileTransferMessage = nil
-    fileTransferProgress = nil
     fileTransferDirection = .upload
   }
 
   private func prepareDownload() {
     remoteFilePath = "~/"
+    resetFileProgress()
     fileTransferMessage = nil
     fileTransferProgress = nil
     fileTransferDirection = .download
@@ -1494,7 +1501,45 @@ struct DesktopRootView: View {
       return
     }
 
-    uploadURLs = panel.urls
+    addUploadURLs(panel.urls)
+  }
+
+  private func addUploadURLs(_ urls: [URL]) {
+    // scp without -r cannot send directories, so folders are skipped.
+    let files = urls.filter {
+      $0.isFileURL && (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true
+    }
+
+    uploadURLs += files.filter { !uploadURLs.contains($0) }
+    resetFileProgress()
+  }
+
+  private func removeUploadURL(_ url: URL) {
+    uploadURLs.removeAll { $0 == url }
+    resetFileProgress()
+  }
+
+  private func resetFileProgress() {
+    fileProgress = [:]
+    fileErrors = [:]
+    fileTransferProgress = nil
+    fileTransferMessage = nil
+  }
+
+  /// Per-file updates arrive from several `tsh scp` processes; the overall bar is their mean.
+  private func applyTransferUpdate(
+    _ index: Int,
+    _ update: TeleportFileTransferOperation.Update,
+    count: Int
+  ) {
+    switch update {
+    case .progress(let progress):
+      fileProgress[index] = progress
+    case .failed(let message):
+      fileErrors[index] = message
+    }
+
+    fileTransferProgress = fileProgress.values.reduce(0, +) / Double(max(count, 1))
   }
 
   private func uploadFiles() {
@@ -1505,6 +1550,7 @@ struct DesktopRootView: View {
 
     let urls = uploadURLs
     let remotePath = remoteFilePath
+    resetFileProgress()
     isTransferringFile = true
     fileTransferProgress = 0
     fileTransferMessage = "Uploading \(urls.count) file\(urls.count == 1 ? "" : "s")…"
@@ -1518,9 +1564,9 @@ struct DesktopRootView: View {
           hostname: transferTarget.hostname
         )
         fileTransferOperation = operation
-        try await operation.run { progress in
+        try await operation.run { index, update in
           Task { @MainActor in
-            fileTransferProgress = progress
+            applyTransferUpdate(index, update, count: urls.count)
           }
         }
         fileTransferDirection = nil
@@ -1553,6 +1599,7 @@ struct DesktopRootView: View {
     }
 
     let remotePath = remoteFilePath
+    resetFileProgress()
     isTransferringFile = true
     fileTransferProgress = 0
     fileTransferMessage = "Downloading file…"
@@ -1566,9 +1613,9 @@ struct DesktopRootView: View {
           hostname: transferTarget.hostname
         )
         fileTransferOperation = operation
-        try await operation.run { progress in
+        try await operation.run { index, update in
           Task { @MainActor in
-            fileTransferProgress = progress
+            applyTransferUpdate(index, update, count: 1)
           }
         }
         fileTransferDirection = nil
@@ -1628,10 +1675,16 @@ private struct FileTransferView: View {
   let isTransferring: Bool
   let message: String?
   let progress: Double?
+  let fileProgress: [Int: Double]
+  let fileErrors: [Int: String]
   let onCancel: () -> Void
   let onChooseFiles: () -> Void
+  let onDropFiles: ([URL]) -> Void
+  let onRemoveFile: (URL) -> Void
   let onChooseDownloadDirectory: () -> Void
   let onUpload: () -> Void
+
+  @State private var isDropTargeted = false
 
   var body: some View {
     VStack(spacing: 18) {
@@ -1648,18 +1701,30 @@ private struct FileTransferView: View {
       if direction == .upload {
         Button(action: onChooseFiles) {
           VStack(spacing: 8) {
-            Image(systemName: uploadURLs.isEmpty ? "doc.badge.plus" : "checkmark.circle.fill")
+            Image(systemName: "doc.badge.plus")
               .font(.title2)
 
             Text(uploadButtonTitle)
+
+            Text("or drop files here")
+              .font(.caption)
+              .foregroundStyle(.secondary)
           }
           .frame(maxWidth: .infinity, minHeight: 90)
           .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(.quaternary.opacity(0.35))
+        .background(.quaternary.opacity(isDropTargeted ? 0.8 : 0.35))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+          RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(Color.accentColor, lineWidth: isDropTargeted ? 2 : 0)
+        }
         .disabled(isTransferring)
+
+        if !uploadURLs.isEmpty {
+          fileList
+        }
 
         Button("Upload", action: onUpload)
           .buttonStyle(.borderedProminent)
@@ -1673,7 +1738,10 @@ private struct FileTransferView: View {
       if isTransferring {
         VStack(spacing: 10) {
           if let progress {
-            ProgressView(value: progress)
+            // Per-file bars are in the list above; downloads have no list.
+            if direction == .download {
+              ProgressView(value: progress)
+            }
 
             Text("\(Int(progress * 100))%")
               .font(.caption.monospacedDigit())
@@ -1703,6 +1771,61 @@ private struct FileTransferView: View {
     .padding(20)
     .frame(width: 420)
     .interactiveDismissDisabled(isTransferring)
+    .dropDestination(for: URL.self) { urls, _ in
+      guard direction == .upload, !isTransferring else {
+        return false
+      }
+
+      onDropFiles(urls)
+      return true
+    } isTargeted: {
+      isDropTargeted = $0 && direction == .upload && !isTransferring
+    }
+  }
+
+  private var fileList: some View {
+    ScrollView {
+      VStack(spacing: 8) {
+        ForEach(Array(uploadURLs.enumerated()), id: \.element) { index, url in
+          VStack(alignment: .leading, spacing: 4) {
+            HStack {
+              Text(url.lastPathComponent)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+              Spacer()
+
+              if fileErrors[index] != nil {
+                Image(systemName: "exclamationmark.circle.fill")
+                  .foregroundStyle(.red)
+              } else if fileProgress[index] == 1 {
+                Image(systemName: "checkmark.circle.fill")
+                  .foregroundStyle(.green)
+              } else if !isTransferring {
+                Button {
+                  onRemoveFile(url)
+                } label: {
+                  Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Remove")
+              }
+            }
+
+            if let error = fileErrors[index] {
+              Text(error)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .lineLimit(2)
+            } else if isTransferring || fileProgress[index] != nil {
+              ProgressView(value: fileProgress[index] ?? 0)
+            }
+          }
+        }
+      }
+    }
+    .frame(maxHeight: 180)
   }
 
   private var uploadButtonTitle: String {
@@ -1710,7 +1833,7 @@ private struct FileTransferView: View {
       return "Choose Files…"
     }
 
-    return "\(uploadURLs.count) file\(uploadURLs.count == 1 ? "" : "s") selected"
+    return "\(uploadURLs.count) file\(uploadURLs.count == 1 ? "" : "s") selected · Add more…"
   }
 
   private var remotePathIsEmpty: Bool {
